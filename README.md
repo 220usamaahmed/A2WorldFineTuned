@@ -66,7 +66,7 @@ results/                         (local only, git-ignored)
   ur5e_pilot_check/              check videos of the 15 held-out episodes
 A2World/                         git submodule: upstream A2World, pinned at commit 077e10a, unmodified (holds the weights and the training venv)
 ```
-Not in git (kept on disk): `results/`, `ur5e_sim/data/` (the 15 held-out episodes), `ur5e_sim/assets/meshes/` and `ur5e_sim/assets/usd/` (meshes and generated USD). Only code, docs and the small URDF are committed.
+Not in git (kept on disk): `results/`, `ur5e_sim/data/` (the 15 held-out episodes), `ur5e_sim/assets/usd/` (generated USD). Code, docs, the URDF and the robot meshes are committed.
 
 ## Where the big files are
 | Path | Contents |
@@ -90,12 +90,12 @@ Not in git (kept on disk): `results/`, `ur5e_sim/data/` (the 15 held-out episode
   1. apex `FusedAdam` needs compiled CUDA extensions. Build apex tag `24.04.01` with only `amp_C` and `apex_C` (`apex_setup.patch`: relaxes the nvcc-vs-torch minor-version check and skips extensions that do not compile with torch 2.6), `TORCH_CUDA_ARCH_LIST=8.6`, nvcc 12.9.
   2. Transformer Engine 1.13 cannot load the stripped release checkpoint through torch's checkpoint loader (`te_ops_op.patch`, `te_module_base.patch`: ignore the `_extra_state` placeholder; it is FP8 metadata, unused in bf16).
   3. **`NCCL_P2P_DISABLE=1`**: peer-to-peer between GPU 0 and GPU 1 hangs (an all-reduce never returns; check with `tools/nccl_check.py`). `run_main_finetune.sh` sets it.
-- **Robot assets** come from the user's Steve project (github.com/220usamaahmed/steve_il, commit `e7592bb`): the UR5e + Robotiq URDF with its meshes, the joint names and the tuned gripper controller were copied into `ur5e_sim/` (`assets/`, `robot_defs.py`, `gripper_action.py`), so this repo does not need that project. The meshes (`ur5e_sim/assets/meshes/`, 13 MB, UR and Robotiq) are git-ignored because their licences are unchecked; to restore them copy `assets/steve/meshes/{ur5e,robotiq_2f_85}` from that project.
+- **Robot assets** come from the user's Steve project (github.com/220usamaahmed/steve_il, commit `e7592bb`): the UR5e + Robotiq URDF with its meshes, the joint names and the tuned gripper controller were copied into `ur5e_sim/` (`assets/`, `robot_defs.py`, `gripper_action.py`), so this repo does not need that project. The meshes (`ur5e_sim/assets/meshes/`, 13 MB, UR5e and Robotiq 2F-85) are committed to this **private** repository. Their licences (Universal Robots, Robotiq) have not been checked: check them before making the repository public.
 
 ## Setup from scratch
 `A2World/` is a git submodule pinned to upstream commit `077e10a` (the version used here; we changed none of its files; upstream has since moved to `LogosIntelligenceLab/A2World` with one docs-only commit). The patches below are applied to *installed packages*, not to the A2World source.
 ```bash
-git clone --recurse-submodules <this repo> && cd A2WorldExperiments      # or: git submodule update --init
+git clone --recurse-submodules git@github.com:220usamaahmed/A2WorldFineTuned.git && cd A2WorldFineTuned      # or, in an existing clone: git submodule update --init
 ```
 **A. A2World training/inference environment** (Python 3.10, torch 2.6.0+cu126, RTX A6000 = sm_86)
 ```bash
@@ -124,15 +124,15 @@ git clone --branch v2.3.2 --depth 1 https://github.com/isaac-sim/IsaacLab.git ~/
 pip install "setuptools<81" wheel && pip install flatdict==4.0.1 --no-build-isolation    # flatdict's build needs pkg_resources
 OMNI_KIT_ACCEPT_EULA=YES ./isaaclab.sh --install none && pip install "packaging==23.0"
 ```
-**C. Robot meshes** (not in git, licences unchecked): copy `assets/steve/meshes/ur5e` and `assets/steve/meshes/robotiq_2f_85` from the Steve project (github.com/220usamaahmed/steve_il, commit `e7592bb`) into `ur5e_sim/assets/meshes/`.
+**C. Robot USD**: the meshes are in the repository (`ur5e_sim/assets/meshes/`; see the licence note under Environment). Generate the USD once with `cd ur5e_sim && OMNI_KIT_ACCEPT_EULA=YES python convert_arm.py --headless`.
 
 **D. Paths**: `ur5e_sim/run_main_finetune.sh` has the data and run directories (`/home/data/siddiquieu1/...`) hard-coded at the top; edit them for your machine.
 
-*This repository has no remote yet; to let others clone it, push it to a host (the submodule URL is public).*
+*Remote: `git@github.com:220usamaahmed/A2WorldFineTuned.git` (private). The A2World submodule URL is public.*
 
 ## How to reproduce
 ```bash
-# 0. robot USD (once; needs ur5e_sim/assets/meshes, see Environment)
+# 0. robot USD (once)
 cd ur5e_sim && OMNI_KIT_ACCEPT_EULA=YES CUDA_VISIBLE_DEVICES=0 python convert_arm.py --headless
 
 # 1. record episodes (held-out set: seed 0; training: seeds >= 1, ~33 s per episode)

@@ -1,7 +1,6 @@
 # Generated or recorded data and assets (regenerate with the scripts in ur5e_sim/)
 ur5e_sim/data/
-# UR / Robotiq meshes (licences unchecked) and generated USD
-ur5e_sim/assets/meshes/
+# generated USD (regenerate with ur5e_sim/convert_arm.py)
 ur5e_sim/assets/usd/
 ur5e_sim/logs/
 ur5e_sim/tmp/
