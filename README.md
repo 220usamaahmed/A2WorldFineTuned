@@ -1,7 +1,7 @@
 # A2World experiments: world-model prediction for a simulated UR5e + Robotiq
 
 Question: how well does the **A2World** action-conditioned video world model
-([paper](https://arxiv.org/abs/2606.29501), [code](https://github.com/LogosRoboticsGroup/A2World),
+([paper](https://arxiv.org/abs/2606.29501), [code](https://github.com/LogosIntelligenceLab/A2World),
 [weights](https://huggingface.co/Fleurrr/A2World-World-Model)) predict the future for a **UR5e arm with a Robotiq 2F-85 gripper**
 moving a cube on a table (including failures where the cube falls off), and what does fine-tuning on simulated data from that robot buy?
 
@@ -64,9 +64,9 @@ results/                         (local only, git-ignored)
   ur5e_pretrained/               step 3
   ur5e_finetuned/iter1500|iter3600/   step 4
   ur5e_pilot_check/              check videos of the 15 held-out episodes
-A2World/                         upstream clone (commit 077e10a), not tracked here; holds the weights and the training venv
+A2World/                         git submodule: upstream A2World, pinned at commit 077e10a, unmodified (holds the weights and the training venv)
 ```
-Ignored by git (kept on disk): `A2World/`, `results/`, `ur5e_sim/data/` (the 15 held-out episodes), `ur5e_sim/assets/meshes/` and `ur5e_sim/assets/usd/` (meshes and generated USD). Only code, docs and the small URDF are committed.
+Not in git (kept on disk): `results/`, `ur5e_sim/data/` (the 15 held-out episodes), `ur5e_sim/assets/meshes/` and `ur5e_sim/assets/usd/` (meshes and generated USD). Only code, docs and the small URDF are committed.
 
 ## Where the big files are
 | Path | Contents |
@@ -91,6 +91,44 @@ Ignored by git (kept on disk): `A2World/`, `results/`, `ur5e_sim/data/` (the 15 
   2. Transformer Engine 1.13 cannot load the stripped release checkpoint through torch's checkpoint loader (`te_ops_op.patch`, `te_module_base.patch`: ignore the `_extra_state` placeholder; it is FP8 metadata, unused in bf16).
   3. **`NCCL_P2P_DISABLE=1`**: peer-to-peer between GPU 0 and GPU 1 hangs (an all-reduce never returns; check with `tools/nccl_check.py`). `run_main_finetune.sh` sets it.
 - **Robot assets** come from the user's Steve project (github.com/220usamaahmed/steve_il, commit `e7592bb`): the UR5e + Robotiq URDF with its meshes, the joint names and the tuned gripper controller were copied into `ur5e_sim/` (`assets/`, `robot_defs.py`, `gripper_action.py`), so this repo does not need that project. The meshes (`ur5e_sim/assets/meshes/`, 13 MB, UR and Robotiq) are git-ignored because their licences are unchecked; to restore them copy `assets/steve/meshes/{ur5e,robotiq_2f_85}` from that project.
+
+## Setup from scratch
+`A2World/` is a git submodule pinned to upstream commit `077e10a` (the version used here; we changed none of its files; upstream has since moved to `LogosIntelligenceLab/A2World` with one docs-only commit). The patches below are applied to *installed packages*, not to the A2World source.
+```bash
+git clone --recurse-submodules <this repo> && cd A2WorldExperiments      # or: git submodule update --init
+```
+**A. A2World training/inference environment** (Python 3.10, torch 2.6.0+cu126, RTX A6000 = sm_86)
+```bash
+cd A2World/world_model
+uv sync --extra cu126                      # creates world_model/.venv (the commands in this README use it); then: source .venv/bin/activate
+uv pip install -e . --no-deps
+# apex with CUDA extensions (FusedAdam, needed for training): tag 24.04.01 + our patch, only amp_C and apex_C are built
+git clone --depth 1 --branch 24.04.01 https://github.com/NVIDIA/apex /path/to/apex && git -C /path/to/apex apply $PWD/../../docs/env_patches/apex_setup.patch
+CUDA_HOME=/usr/local/cuda TORCH_CUDA_ARCH_LIST=8.6 MAX_JOBS=6 uv pip install -v --no-deps --no-build-isolation \
+    --config-setting="--build-option=--cpp_ext" --config-setting="--build-option=--cuda_ext" /path/to/apex
+# Transformer Engine: ignore the missing _extra_state placeholder when loading the release checkpoint
+(cd .venv/lib/python3.10/site-packages && for p in te_ops_op te_module_base; do patch -p1 < ../../../../../../docs/env_patches/$p.patch; done)
+# weights (Hugging Face) and the NVIDIA base assets (needs `hf auth login` and accepting the NVIDIA model terms)
+hf download Fleurrr/A2World-World-Model a2world-pretrained.pt a2world-libero.pt weights.json --local-dir a2world_ckpt
+python scripts/download_base_models.py --checkpoint-dir checkpoints
+a2world-env-check --require-cuda
+```
+The patches were verified: the two TE patches match the installed files, and `apex_setup.patch` applies cleanly to the pristine tag. The apex patch relaxes the nvcc-vs-torch minor-version check (nvcc 12.9 here, torch built with 12.6) and skips the extensions that do not compile with torch 2.6.
+
+**B. Isaac Sim environment** (Python 3.11; order used here, with the `flatdict` workaround moved first, which avoids the failure we hit)
+```bash
+conda create -n env_isaaclab python=3.11 -y && conda activate env_isaaclab
+pip install "isaacsim[all,extscache]==5.1.0" --extra-index-url https://pypi.nvidia.com
+pip install -U torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128
+git clone --branch v2.3.2 --depth 1 https://github.com/isaac-sim/IsaacLab.git ~/IsaacLab && cd ~/IsaacLab
+pip install "setuptools<81" wheel && pip install flatdict==4.0.1 --no-build-isolation    # flatdict's build needs pkg_resources
+OMNI_KIT_ACCEPT_EULA=YES ./isaaclab.sh --install none && pip install "packaging==23.0"
+```
+**C. Robot meshes** (not in git, licences unchecked): copy `assets/steve/meshes/ur5e` and `assets/steve/meshes/robotiq_2f_85` from the Steve project (github.com/220usamaahmed/steve_il, commit `e7592bb`) into `ur5e_sim/assets/meshes/`.
+
+**D. Paths**: `ur5e_sim/run_main_finetune.sh` has the data and run directories (`/home/data/siddiquieu1/...`) hard-coded at the top; edit them for your machine.
+
+*This repository has no remote yet; to let others clone it, push it to a host (the submodule URL is public).*
 
 ## How to reproduce
 ```bash

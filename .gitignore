@@ -1,6 +1,3 @@
-# Upstream A2World clone (own git history; holds the weights and the training venv)
-A2World/
-
 # Generated or recorded data and assets (regenerate with the scripts in ur5e_sim/)
 ur5e_sim/data/
 # UR / Robotiq meshes (licences unchecked) and generated USD

@@ -1,0 +1,3 @@
+[submodule "A2World"]
+	path = A2World
+	url = https://github.com/LogosIntelligenceLab/A2World
