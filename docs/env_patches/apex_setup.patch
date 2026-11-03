@@ -1,0 +1,24 @@
+diff --git a/setup.py b/setup.py
+index 6a0bd57..4c09f1a 100644
+--- a/setup.py
++++ b/setup.py
+@@ -36,7 +36,7 @@ def check_cuda_torch_binary_vs_bare_metal(cuda_dir):
+     print("\nCompiling cuda extensions with")
+     print(raw_output + "from " + cuda_dir + "/bin\n")
+ 
+-    if (bare_metal_version != torch_binary_version):
++    if bare_metal_version.major != torch_binary_version.major:  # local change: minor mismatch (nvcc 12.9 vs torch cu126) accepted
+         raise RuntimeError(
+             "Cuda extensions are being compiled with a version of Cuda that does "
+             "not match the version used to compile Pytorch binaries.  "
+@@ -860,6 +860,10 @@ if "--gpu_direct_storage" in sys.argv:
+     )
+ 
+ 
++# local change: torch 2.6 cannot compile some apex csrc files (deprecated .type() dispatch); only the multi-tensor kernels are needed for FusedAdam
++ext_modules = [m for m in ext_modules if m.name in ("amp_C", "apex_C")]
++print("building extensions:", [m.name for m in ext_modules])
++
+ setup(
+     name="apex",
+     version="0.1",

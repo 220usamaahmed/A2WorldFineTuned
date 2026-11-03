@@ -1,0 +1,11 @@
+--- a/transformer_engine/pytorch/module/base.py
++++ b/transformer_engine/pytorch/module/base.py
+@@ -629,7 +629,7 @@
+             state.seek(0)
+             state = torch.load(state, map_location="cuda")
+         else:
+-            raise RuntimeError("Unsupported checkpoint format.")
++            return  # local patch: torch DCP passes a non-tensor placeholder when the checkpoint has no extra state
+ 
+         if state is None:
+             return

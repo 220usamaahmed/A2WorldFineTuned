@@ -1,0 +1,12 @@
+--- a/transformer_engine/pytorch/ops/op.py
++++ b/transformer_engine/pytorch/ops/op.py
+@@ -586,7 +586,8 @@
+ 
+     def set_extra_state(self, state: Optional[torch.Tensor]) -> None:
+         """Load extra state"""
+-        if state is None or state.numel() == 0:
++        # local patch: torch DCP passes a non-tensor placeholder when the checkpoint has no extra state (release checkpoints strip it)
++        if state is None or not isinstance(state, torch.Tensor) or state.numel() == 0:
+             return
+ 
+         # Deserialize state from byte tensor
