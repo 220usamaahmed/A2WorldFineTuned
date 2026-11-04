@@ -1,0 +1,128 @@
+# Stage 2: cuRobo motion planning and sampled grasps
+
+How the arm is moved in the stage-2 scenes (drawers now, shelves and table later), what was built, and what was measured.
+Everything here is simulation (Isaac Sim 5.1 / Isaac Lab 2.3.2, UR5e + Robotiq 2F-85).
+
+## Before / after
+
+| | before (sidebins_test.py) | now (planning/, sidebins_curobo.py, table_grasps.py) |
+|---|---|---|
+| trajectory | straight Cartesian lines between hand-picked waypoints, fixed transit height | cuRobo MotionGen (collision-aware, time-parameterised), straight lines only for approach / lift / pull / place |
+| low-level control | differential IK (DLS) on a TCP pose; PD drives with zero velocity target (lag up to 3 cm) | joint targets interpolated over the physics substeps + velocity feed-forward (joint_traj_action.py) |
+| collision avoidance | none (waypoints chosen to stay clear) | table, drawer housings, crates at their current slide, objects (YCB meshes) at their current poses; carried object attached to the robot |
+| grasp pose | fixed rule: top-down, object centre, fingers along world x | antipodal sampler on the object mesh, any object pose; the planner picks a reachable one |
+
+## Pieces
+
+* `ur5e_sim/planning/make_robot_cfg.py` -> `ur5e_2f85.yml`: cuRobo robot model from our URDF. TCP = `ur5e_tool0` + 0.1388 m
+  (same as the sim); checked against the sim's ready pose (0.3 mm). Arm collision spheres: cuRobo's UR5e template.
+  Gripper spheres: own cover of the 2F-85 collision meshes (cuRobo's fitter covered < 25 % of these links' surfaces);
+  full coverage, sticks out <= 13 mm. `finger_joint` locked open. An `attached_object` link carries grasped objects.
+* `ur5e_sim/planning/planner.py` (`ArmPlanner`): free-space plans, joint-space plans, straight lines, batched IK,
+  attach / detach, obstacle sync, and `plan_grasp` (below). Output: joint trajectories at the 10 Hz control step.
+* `ur5e_sim/joint_traj_action.py` + `ur5e_env.Ur5eTableJointEnvCfg`: the arm action is the joint configuration to reach at
+  the end of the control step.
+* `ur5e_sim/planning/grasps.py`: antipodal grasp sampler (+ disk cache per object).
+* `ur5e_sim/scene/layout.py`: scene geometry as numbers (drives both the Isaac scene and the cuRobo world).
+* `ur5e_sim/scene/export_ycb_meshes.py`, `make_ycb_physics.py`: YCB meshes as .obj (object root frame) and
+  physics-enabled USD wrappers for the 17 YCB objects Isaac ships without physics (official masses, convex colliders).
+
+### plan_grasp
+Given candidate grasp poses, it works backwards from the grasp: collision-aware IK at the grasps (the object itself
+ignored), several IK branches each and both 2*pi-equivalents where a joint is ~pi away; (grasp, branch) pairs tried
+nearest-first in joint space (or in the caller's order, for variety); for each, a straight Cartesian IK chain from the grasp
+back to the pregrasp (10 cm along the approach axis), then a free-space plan to that pregrasp configuration, falling back
+to going via a high home pose, or via a point straight above the pregrasp at 0.35 m. Reasons, all found the hard way:
+planning to the pregrasp *pose* lets cuRobo pick an IK branch from which the straight descent is impossible (the wrist ends
+up under a housing roof); cuRobo's hold-pose trajopt fails when an arm link is within a few cm of an obstacle; its
+joint-space trajopt fails on wrist reconfigurations even where the straight joint line is free; the old ready pose is only
+3 cm above the table, too low to flip the wrist.
+
+### Grasp sampler
+Surface points p1 with normals, a ray into the object finds the opposite surface p2; keep pairs narrower than the open gap
+minus 8 mm whose normals lie in the friction cone (mu 0.5); each pair gives 16 approach directions around the grasp axis.
+A grasp is rejected if the open gripper (42 boxes from the URDF at finger_joint 0, slanted links cut into slices), swept
+back 10 cm along the approach, overlaps the object's surface points. Score: antipodality, distance of the grasp axis from
+the object's centre, width margin. Per scene, grasps are moved to the object's simulated pose, filtered so the open gripper
+stays above the table, and a score-weighted random subset is passed to `plan_grasp` in that order.
+
+## Results (2026-11-04)
+
+**Planner alone** (`planning/test_planner.py`, no simulator): top-down grasp plans at 3 positions in each of the 3 open
+crates, from both start poses: 18/18, straight descent within 0.1 mm, planning median 2.1 s (max 3.5 s) on a shared
+RTX A6000. Free-space plans to table poses: 0.4-0.6 s. Motion durations 1.3-4.5 s at half the time-optimal speed.
+
+**Drawer task, cans, top-down rule grasp** (`scene/sidebins_curobo.py --can-y=-0.04,0,-0.04`, one run):
+
+| bin | crate pulled | TCP error at grasp | can lifted | placed upright | TCP error at place |
+|---|---|---|---|---|---|
+| 0 | 0.149 m | 0.9 mm | 9.1 cm | yes | 1.0 mm |
+| 1 | 0.119 m | 1.0 mm | 9.1 cm | yes | 1.4 mm |
+| 2 | 0.149 m | 0.9 mm | 9.3 cm | yes | 0.9 mm |
+
+Joint tracking error stayed below 0.8 deg in every motion (the old IK-pose control lagged up to 3 cm). Caveats:
+bin 1's pull is shortened to 0.12 m automatically (at 0.15 m the folded arm collides with itself in the sphere model: the
+template shoulder sphere is ~4 cm too fat); bin 2's can had to move from crate y = +0.04 (the old test's spot) to -0.04:
+at +0.04 every IK solution puts the forearm under the housing roof or between the housing walls with 0-2 mm, below the
+1 cm activation distance (the old script's run probably clipped the walls; PhysX allowed it). Place spots were moved 5 cm
+away from the pulled-out crates (the old -0.12 left 14 mm between the can and bin 2's crate).
+
+**Sampled grasps on the table** (`scene/table_grasps.py`, 4 objects x 5 trials, random graspable resting pose and yaw,
+seed 2, 40 score-weighted random candidates per pick):
+
+| gripper stiffness | planned | lifted | soup can | pudding box | potted meat can | gelatin box |
+|---|---|---|---|---|---|---|
+| 6 (as tuned) | 17/20 | 5/20 | 1/5 | 2/5 | 0/5 | 2/5 |
+| 20 | 20/20 | 7/20 | 3/5 | 1/5 | 0/5 | 3/5 |
+
+Approach angles of the executed grasps spread from 0 to 75 deg from vertical (k = 20: 3 / 4 / 7 / 3 / 3 in 15-deg bins).
+An earlier run with the foam brick (28 g): 6/6 lifted. The failures are at the gripper, not the plan: the arm reaches
+the grasp within 0.1 mm, the object does not move during the approach, and after closing the pads sit on the object
+(e.g. 69 mm apart on the 72.5 mm gelatin box), yet the object stays on the table. The finger joint angles do not match the
+pad positions (left finger 0.55 rad with its pad where 0.12 rad would put it): the simulated four-bar linkage gives way
+under contact instead of squeezing. Outcomes for the same grasp flip between stiffness 6 and 20 in both directions, so
+stiffness is not the lever. This is the gripper model the previous stage tuned on a 5 cm cube.
+
+**Drawer task, mixed short objects, sampled grasps** (`--objects mixed --grasps sampled --seed 0`, one run): all three
+crates opened (0.148 / 0.118 / 0.148 m) and all three grasps were planned and reached (TCP error 0.0 mm).
+Foam brick: 30 deg approach, lifted, placed 5 mm / 4 deg from the target pose. Gelatin box: 11 deg approach across its
+27 mm side, lifted and carried, but it ended 86 mm / 122 deg off the target (tipped over at or after the release).
+Banana: 9 deg approach, not lifted (gripper, as above).
+
+Not graspable by the 2F-85 in any resting pose (grasp sampler + floor filter): tuna can (86 mm across, 34 mm tall),
+large marker, scissors (too flat). Lying flat, the pudding box and potted meat can are not graspable either (their
+horizontal sides are wider than the 85 mm opening); scene sampling now only uses resting poses with >= 20 valid grasps.
+
+## Setup (in the Isaac Lab env `env_isaaclab`)
+cuRobo at the commit Isaac Lab 2.3 tests against, built against the env's torch 2.7 / cu128 with the CUDA 12.9 toolkit
+(`/usr/local/cuda-12.8` here has no nvcc; torch only refuses a different CUDA *major* version):
+```bash
+git clone https://github.com/NVlabs/curobo.git /home/data/siddiquieu1/src/curobo && cd /home/data/siddiquieu1/src/curobo
+git checkout ebb71702f3f70e767f40fd8e050674af0288abe8 && git apply <repo>/docs/env_patches/curobo_warp118.patch   # warp 1.18 dropped wp.torch.*
+# dependencies, without moving anything Isaac pins (packaging==23.0 in particular; setuptools_scm>=9 would pull 26.x)
+printf "torch==2.7.0+cu128\nnumpy==1.26.0\nwarp-lang==1.18.0\nscipy==1.15.3\ntrimesh==4.5.1\nnetworkx==3.3\nsetuptools==80.10.2\npackaging==23.0\n" > /tmp/c.txt
+pip install -c /tmp/c.txt pybind11 numpy-quaternion "setuptools_scm>=6.2,<9" yourdfpy importlib_resources scikit-image ninja
+unset PYTHONPATH PYTHONHOME; export CUDA_HOME=/usr/local/cuda-12.9 PATH=/usr/local/cuda-12.9/bin:$PATH TORCH_CUDA_ARCH_LIST=8.6
+pip install -e . --no-build-isolation --no-deps        # ~20 min of CUDA compilation
+```
+Then, from `ur5e_sim/planning/`: `python make_robot_cfg.py` (regenerates `ur5e_2f85.yml`, checks it against the sim) and
+`CUDA_VISIBLE_DEVICES=0 python test_planner.py`. Asset prerequisites for the scene scripts (all under /home/data):
+`scene/export_ycb_meshes.py` (meshes) and `scene/make_ycb_physics.py` (physics wrappers), each run once with `--headless`.
+Grasp caches build themselves on first use (`/home/data/siddiquieu1/assets/grasp_cache/`, ~1 min per object).
+
+Commands used for the results above:
+```bash
+cd ur5e_sim/scene
+OMNI_KIT_ACCEPT_EULA=YES CUDA_VISIBLE_DEVICES=0 python sidebins_curobo.py --headless --can-y=-0.04,0.0,-0.04
+OMNI_KIT_ACCEPT_EULA=YES CUDA_VISIBLE_DEVICES=0 python table_grasps.py --headless --trials 5 --seed 2 \
+    --objects 005_tomato_soup_can,008_pudding_box,010_potted_meat_can,009_gelatin_box --grip-k 20
+OMNI_KIT_ACCEPT_EULA=YES CUDA_VISIBLE_DEVICES=0 python sidebins_curobo.py --headless --objects mixed --grasps sampled --seed 0
+```
+Videos and json results go to `/home/data/siddiquieu1/scene_previews/{curobo,table_grasps}/`.
+
+## Known limits
+* Collision model is conservative: the template arm spheres stick out ~2 cm (the shoulder sphere 4 cm), plus a 1 cm
+  activation distance. Some placements the physical arm could reach are refused (examples in Results).
+* Thin-walled YCB meshes (mug, bowl) give no grasps: the Isaac meshes are open shells 1.5-2.5 mm thick, and their simulated
+  colliders are convex anyway.
+* Grasp success is judged by lifting in the simulator only; no shaking, no repeated trials per grasp.

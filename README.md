@@ -42,7 +42,8 @@ README.md
 docs/
   UR5e_finetuning_plan.md        first, general plan (data, cameras, format, estimates)
   UR5e_finetune_2gpu_plan.md     the executed one-day / 2-GPU plan, pilot results (section 10) and outcome note
-  env_patches/                   patches needed to train on this machine (see "Environment")
+  stage2_motion_planning.md      stage 2: cuRobo motion planning + sampled grasps in the drawer / table scenes, results
+  env_patches/                   patches needed to train on this machine (see "Environment"); curobo_warp118.patch for cuRobo
 eval/
   eval_libero.py                 LIBERO checkpoint on LIBERO demos (step 1)
   eval_ur5e.py                   pretrained checkpoint on UR5e episodes, 3 views (step 3)
@@ -52,7 +53,10 @@ ur5e_sim/
   convert_arm.py                 URDF -> USD (Isaac Lab importer, fixed base, mimic joints)
   robot_defs.py                  joint/link names, ready pose, TCP offset (from the Steve project)
   gripper_action.py              tuned Robotiq action term: finger angle -> all six gripper joints (from the Steve project)
-  ur5e_env.py                    Isaac Lab environment: table, cube, 3 cameras, differential-IK TCP control
+  ur5e_env.py                    Isaac Lab environment: table, cube, 3 cameras, differential-IK TCP control (Ur5eTableJointEnvCfg: joint control)
+  joint_traj_action.py           arm action for planned joint trajectories (substep ramp + velocity feed-forward)
+  planning/                      stage 2: cuRobo robot config (make_robot_cfg.py -> ur5e_2f85.yml), planner.py, grasps.py (antipodal sampler), test_planner.py
+  scene/                         stage 2: scene assets and tests (layout.py, build_pullbin.py, sidebins_curobo.py, table_grasps.py, YCB mesh/physics export; sidebins_test.py = the pre-cuRobo version)
   collect.py                     scripted episodes + recording (data.npz and mp4 per episode)
   preview.py                     render the three cameras once (to check placement)
   make_check_video.py            frames + state plots video for recorded episodes
