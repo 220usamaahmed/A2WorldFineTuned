@@ -50,13 +50,15 @@ eval/
   eval_ur5e_ft.py                fine-tuned checkpoint on UR5e episodes, 2 views (step 4)
 ur5e_sim/
   assets/ur5e_gripper.urdf       UR5e + Robotiq 2F-85 only (no mobile base, no cabinet), mesh paths relative to assets/meshes/
-  convert_arm.py                 URDF -> USD (Isaac Lab importer, fixed base, mimic joints)
+  convert_arm.py                 URDF -> USD (Isaac Lab importer, fixed base, mimic joints; --simple for the simplified gripper)
   robot_defs.py                  joint/link names, ready pose, TCP offset (from the Steve project)
   gripper_action.py              tuned Robotiq action term: finger angle -> all six gripper joints (from the Steve project)
   ur5e_env.py                    Isaac Lab environment: table, cube, 3 cameras, differential-IK TCP control (Ur5eTableJointEnvCfg: joint control)
   joint_traj_action.py           arm action for planned joint trajectories (substep ramp + velocity feed-forward)
+  make_simple_gripper.py         stage 2: URDF variant with simplified gripper physics (sliding force-limited pads; linkage visual only),
+                                 -> assets/ur5e_gripper_simple.urdf + simple_gripper.json; USD via convert_arm.py --simple; ur5e_env.use_simple_gripper()
   planning/                      stage 2: cuRobo robot config (make_robot_cfg.py -> ur5e_2f85.yml), planner.py, grasps.py (antipodal sampler), test_planner.py
-  scene/                         stage 2: scene assets and tests (layout.py, build_pullbin.py, sidebins_curobo.py, table_grasps.py, YCB mesh/physics export; sidebins_test.py = the pre-cuRobo version)
+  scene/                         stage 2: scene assets and tests (layout.py, build_pullbin.py, sidebins_curobo.py, table_grasps.py, gripper_test.py, YCB mesh/physics export; sidebins_test.py = the pre-cuRobo version)
   collect.py                     scripted episodes + recording (data.npz and mp4 per episode)
   preview.py                     render the three cameras once (to check placement)
   make_check_video.py            frames + state plots video for recorded episodes

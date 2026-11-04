@@ -11,6 +11,7 @@ Everything here is simulation (Isaac Sim 5.1 / Isaac Lab 2.3.2, UR5e + Robotiq 2
 | low-level control | differential IK (DLS) on a TCP pose; PD drives with zero velocity target (lag up to 3 cm) | joint targets interpolated over the physics substeps + velocity feed-forward (joint_traj_action.py) |
 | collision avoidance | none (waypoints chosen to stay clear) | table, drawer housings, crates at their current slide, objects (YCB meshes) at their current poses; carried object attached to the robot |
 | grasp pose | fixed rule: top-down, object centre, fingers along world x | antipodal sampler on the object mesh, any object pose; the planner picks a reachable one |
+| gripper physics | Robotiq four-bar linkage with mimic constraints, squeeze ~ gain x remaining angle, friction 4 needed | two sliding pads, 20 N force-limited and coupled; the linkage is visual only (follows the pads); friction 1 |
 
 ## Pieces
 
@@ -26,6 +27,21 @@ Everything here is simulation (Isaac Sim 5.1 / Isaac Lab 2.3.2, UR5e + Robotiq 2
 * `ur5e_sim/scene/layout.py`: scene geometry as numbers (drives both the Isaac scene and the cuRobo world).
 * `ur5e_sim/scene/export_ycb_meshes.py`, `make_ycb_physics.py`: YCB meshes as .obj (object root frame) and
   physics-enabled USD wrappers for the 17 YCB objects Isaac ships without physics (official masses, convex colliders).
+
+### Simplified gripper physics
+`ur5e_sim/make_simple_gripper.py` writes `assets/ur5e_gripper_simple.urdf` (+ `simple_gripper.json`); `convert_arm.py
+--simple` makes the USD; `ur5e_env.use_simple_gripper(cfg)` switches an env to it (default in `sidebins_curobo.py` and
+`table_grasps.py`, `--gripper linkage` for the old model). The Robotiq finger links keep their meshes but lose their
+colliders and mimic joints. Two invisible pads on prismatic joints from the gripper base do the gripping: each slides on
+the straight line from the real pad's open to its closed position (44.5 mm, 13.9 mm of it along the approach axis), at
+most 4.5 mm from the real pad's arc. Gripping face = the real pad (22 x 37.5 mm); the collider is 15 mm thick, extending
+outwards. Drive: 4000 N/m, force limit 20 N (the real 2F-85's minimum), 0.1 m/s. `SimpleGripperAction` keeps the action
+meaning (finger angle 0..0.8 rad -> the pad gap the real linkage has at that angle), couples the pads like the real
+mechanism (neither target may lead the other pad by more than 5 mm) and drives the visual linkage, per side, to the angle
+matching that pad's measured position (rendered pads within 4.7 mm of the physics pads).
+Checked (`scene/gripper_test.py`): free air, gap = command at every angle; 5 cm cube floating between the pads: 5-30 N hold
+it centred with <= 1.5 mm penetration. Found on the way: independent pads (a neutral tie) let one pad shove the cube 27 mm
+and push the other back to its stop; 6.35 mm thick pads at 40 N, and 15 mm ones at 40 N, are pushed through the cube.
 
 ### plan_grasp
 Given candidate grasp poses, it works backwards from the grasp: collision-aware IK at the grasps (the object itself
@@ -47,6 +63,27 @@ the object's centre, width margin. Per scene, grasps are moved to the object's s
 stays above the table, and a score-weighted random subset is passed to `plan_grasp` in that order.
 
 ## Results (2026-11-04)
+
+### With the simplified gripper (current default)
+**Sampled grasps on the table**, same scenes as the four-bar runs below (4 objects x 5 trials, seed 2): **20/20 lifted** at
+friction 4 and **20/20 at friction 1** (soup can, pudding box, potted meat can, gelatin box: 5/5 each; approach angles
+0-75 deg from vertical: 7 / 6 / 2 / 0 / 5 in 15-deg bins). The four-bar gripper lifted 5/20 and 7/20 in these scenes.
+Foam brick alone (8 trials, seed 5): 6/8. The two failures are deterministic (same result with 255-vertex hulls): the pads
+close 3-5 mm inside the sampled width (72.7 mm on a 75.9 mm grasp; 44.6 on 50.1) and the brick stays on the table, while
+in the six successes the pads stop within 1 mm of its surface. Cause not found yet.
+
+**Drawer task, mixed objects, sampled grasps** (seed 0, friction 1): gelatin box placed 2 mm / 2 deg from the target pose,
+banana 3 mm / 0 deg; the foam brick's grasp (76 mm, at the gripper's limit) did not lift it (the brick problem above).
+**Drawer task, cans** (friction 1): bins 0 and 1 opened, picked (TCP error 1.0-1.1 mm) and placed (0-2 mm, 0 deg). Bin 2's
+can was lifted, but the straight put-down failed at 95 %: the carried can's spheres come inside the 1 cm collision
+activation distance of the table when set down 4 mm above it. Fixed by putting down to 2 cm with full checking and the
+last 2 cm with only the table ignored. On the rerun the final 2 cm still failed for bin 2 (with the can held lower in the
+new pads, the wrist met bin 2's pulled-out crate wall), so bin 2's place spot moved from (0.40, -0.08) to (0.42, -0.04):
+bin 2 then opened (0.151 m), picked (1.0 mm) and placed (4 mm / 4 deg). So all three bins work with the new gripper, bins
+0-1 from the full run and bin 2 from a single-bin rerun. `ArmPlanner.plan_pose` also gained a fallback (IK + joint-space
+plan), after one free-space plan to bin 2's rim bar failed in cuRobo's fine-tuning step.
+
+### With the four-bar gripper (the earlier runs)
 
 **Planner alone** (`planning/test_planner.py`, no simulator): top-down grasp plans at 3 positions in each of the 3 open
 crates, from both start poses: 18/18, straight descent within 0.1 mm, planning median 2.1 s (max 3.5 s) on a shared
@@ -126,3 +163,5 @@ Videos and json results go to `/home/data/siddiquieu1/scene_previews/{curobo,tab
 * Thin-walled YCB meshes (mug, bowl) give no grasps: the Isaac meshes are open shells 1.5-2.5 mm thick, and their simulated
   colliders are convex anyway.
 * Grasp success is judged by lifting in the simulator only; no shaking, no repeated trials per grasp.
+* Simplified gripper: the physics pads move on a straight line, the rendered Robotiq fingers on the real arc, up to 4.7 mm
+  apart; the squeeze is a constant 20 N (PhysX pushed the pads through a 5 cm cube at 40 N); the foam brick problem above.

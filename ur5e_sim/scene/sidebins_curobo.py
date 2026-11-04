@@ -32,7 +32,7 @@ ap.add_argument("--hook-gap", type=float, default=0.040, help="finger gap while 
 ap.add_argument("--latch-stiffness", type=float, default=3000.0)
 ap.add_argument("--slide-damping", type=float, default=15.0)
 ap.add_argument("--grip-k", type=float, default=6.0)
-ap.add_argument("--friction", type=float, default=4.0, help="pads and objects (the simulated squeeze is weak)")
+ap.add_argument("--friction", type=float, default=1.0, help="pads and objects; 1.0 with the simple gripper (the four-bar model needed 4)")
 ap.add_argument("--can-y", default="-0.04,0.0,0.04", help="crate-local y of the soup can in each bin (sidebins_test.py: -0.04,0,0.04)")
 ap.add_argument("--objects", default="cans", help='"cans", "mixed" (061_foam_brick,009_gelatin_box,011_banana), or 3 comma-separated YCB keys')
 ap.add_argument("--grasps", default="rule", choices=["rule", "sampled"])
@@ -40,6 +40,8 @@ ap.add_argument("--seed", type=int, default=0)
 ap.add_argument("--candidates", type=int, default=40, help="sampled grasps handed to the planner per pick")
 ap.add_argument("--out", type=Path, default=Path("/home/data/siddiquieu1/scene_previews/curobo"))
 ap.add_argument("--tag", default="")
+ap.add_argument("--gripper", default="simple", choices=["simple", "linkage"], help="simple: sliding physics pads (make_simple_gripper.py); linkage: the original four-bar model")
+ap.add_argument("--grip-force", type=float, default=20.0, help="squeeze force per pad with --gripper simple [N]")
 AppLauncher.add_app_launcher_args(ap)
 args = ap.parse_args()
 args.enable_cameras = True
@@ -69,7 +71,7 @@ YCB = Path("/home/data/siddiquieu1/assets/Isaac/5.1/Isaac/Props/YCB/Axis_Aligned
 MESHES = Path("/home/data/siddiquieu1/assets/ycb_meshes")
 # table, in front of the arm (world x, y); a pulled-out crate reaches over the table to y = -0.17 (bin 2 spans x 0.27-0.67),
 # so the spots stay >= 5 cm clear of it (the old -0.12 left 14 mm between the can and the crate)
-PLACE_XY = [(0.40, 0.14), (0.40, 0.02), (0.40, -0.08)]
+PLACE_XY = [(0.40, 0.14), (0.40, 0.02), (0.42, -0.04)]  # bin 2 spot: at y -0.08 the wrist met the crate wall on set-down
 PHYS = Path("/home/data/siddiquieu1/assets/ycb_physics")
 rng = np.random.default_rng(args.seed)
 
@@ -171,9 +173,12 @@ HOME = planner.home
 print("planner ready; home", np.round(HOME, 3), flush=True)
 
 cfg = EnvCfg()
+if args.gripper == "simple":
+    E.use_simple_gripper(cfg, grip_force=args.grip_force)
 cfg.scene.robot.init_state.joint_pos.update(dict(zip(n.ARM_JOINTS, map(float, HOME))))
-cfg.scene.robot.actuators["gripper"].stiffness = args.grip_k
-cfg.scene.robot.actuators["gripper"].damping = 0.05 * args.grip_k
+if args.gripper == "linkage":
+    cfg.scene.robot.actuators["gripper"].stiffness = args.grip_k
+    cfg.scene.robot.actuators["gripper"].damping = 0.05 * args.grip_k
 env = ManagerBasedRLEnv(cfg)
 env.reset()
 dev = env.device
@@ -390,7 +395,11 @@ for i in [int(b) for b in args.bins.split(",")]:
         carry, k = planner.plan_goalset(state["q"], np.array(cands), tag="to above the place point")
         run(need(carry, "carry"), name="carry")
         place_tcp = cands[k] - np.r_[0, 0, 0.10, 0, 0, 0, 0]
-        run(need(planner.plan_linear(state["q"], place_tcp, frame="base", free_axis=2, max_speed=0.04), "put down"), name="put down")
+        # down to 2 cm above the resting pose with full collision checking, the last 2 cm with the table ignored: at 4 mm
+        # the carried object's spheres are inside cuRobo's 1 cm activation distance of the table top
+        run(need(planner.plan_linear(state["q"], place_tcp + np.r_[0, 0, 0.02, 0, 0, 0, 0], frame="base", free_axis=2, max_speed=0.04), "put down"), name="put down")
+        with planner.relaxed(ignore=["table"]):
+            run(need(planner.plan_cartesian(state["q"], place_tcp, max_speed=0.02), "set down"), name="set down")
         e_place = tcp_err(place_tcp)
         set_grip(0.0, steps=12, settle=6)
         planner.detach()
@@ -423,4 +432,9 @@ imageio.mimwrite(path, frames, fps=10, macro_block_size=1)
 (args.out / f"sidebins_curobo{args.tag}.json").write_text(json.dumps(dict(results=results, motions=log), indent=1))
 print("video:", path, len(frames), "frames", flush=True)
 env.close()
-app.close()
+# Isaac Sim sometimes hangs in app.close() after a run (two such zombies held 22 GB of GPU 0 for hours): outputs are
+# written, so leave hard
+sys.stdout.flush()
+import os  # noqa: E402
+
+os._exit(0)

@@ -56,6 +56,9 @@ for f in sorted(args.ycb.glob("*.usd")):
         mc = UsdPhysics.MeshCollisionAPI.Apply(mp)
         if name in HULL:
             mc.CreateApproximationAttr(UsdPhysics.Tokens.convexHull)
+            # PhysX's default hull has <= 64 vertices; on rounded boxes (foam brick) that differs from the exact hull the
+            # grasp sampler uses by enough to miss grasps near the edges. 255 is the maximum.
+            PhysxSchema.PhysxConvexHullCollisionAPI.Apply(mp).CreateHullVertexLimitAttr(255)
         else:
             mc.CreateApproximationAttr(UsdPhysics.Tokens.convexDecomposition)
             cd = PhysxSchema.PhysxConvexDecompositionCollisionAPI.Apply(mp)

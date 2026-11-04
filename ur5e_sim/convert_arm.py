@@ -1,6 +1,7 @@
 """URDF -> USD for the UR5e + Robotiq arm (fixed base). Importer settings as in the Steve project's convert_urdf.py.
 
-    OMNI_KIT_ACCEPT_EULA=YES python convert_arm.py --headless
+    OMNI_KIT_ACCEPT_EULA=YES python convert_arm.py --headless            # ur5e_gripper.usd (four-bar gripper physics)
+    OMNI_KIT_ACCEPT_EULA=YES python convert_arm.py --headless --simple   # ur5e_gripper_simple.usd (make_simple_gripper.py)
 """
 import argparse
 from pathlib import Path
@@ -8,6 +9,7 @@ from pathlib import Path
 from isaaclab.app import AppLauncher
 
 parser = argparse.ArgumentParser()
+parser.add_argument("--simple", action="store_true", help="convert assets/ur5e_gripper_simple.urdf (sliding physics pads)")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 simulation_app = AppLauncher(args).app
@@ -16,7 +18,8 @@ from isaaclab.sim.converters import UrdfConverter, UrdfConverterCfg  # noqa: E40
 from pxr import Usd  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
-URDF = HERE / "assets" / "ur5e_gripper.urdf"
+NAME = "ur5e_gripper_simple" if args.simple else "ur5e_gripper"
+URDF = HERE / "assets" / f"{NAME}.urdf"
 USD_DIR = HERE / "assets" / "usd"
 
 
@@ -37,7 +40,7 @@ def tune_mimic_joints(usd_path: str, freq: float = 200.0, damping_ratio: float =
 cfg = UrdfConverterCfg(
     asset_path=str(URDF),
     usd_dir=str(USD_DIR),
-    usd_file_name="ur5e_gripper.usd",
+    usd_file_name=f"{NAME}.usd",
     fix_base=True,
     merge_fixed_joints=False,  # keep ur5e_tool0 as a body
     convert_mimic_joints_to_normal_joints=True,  # (sic) = import <mimic> as PhysX mimic joints
@@ -57,6 +60,6 @@ stage = Usd.Stage.Open(conv.usd_path)
 print("[convert_arm] default prim:", stage.GetDefaultPrim().GetPath())
 for prim in stage.Traverse():
     p = str(prim.GetPath())
-    if prim.GetTypeName() in ("Xform", "PhysicsRevoluteJoint", "PhysicsFixedJoint") and p.count("/") <= 3:
+    if prim.GetTypeName() in ("Xform", "PhysicsRevoluteJoint", "PhysicsFixedJoint", "PhysicsPrismaticJoint") and p.count("/") <= 3:
         print("  ", prim.GetTypeName(), p)
 simulation_app.close()

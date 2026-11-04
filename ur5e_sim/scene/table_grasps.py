@@ -26,12 +26,14 @@ ap.add_argument("--trials", type=int, default=5)
 ap.add_argument("--seed", type=int, default=0)
 ap.add_argument("--objects", default="005_tomato_soup_can,008_pudding_box,010_potted_meat_can,061_foam_brick")
 ap.add_argument("--speed", type=float, default=0.5)
-ap.add_argument("--friction", type=float, default=4.0)
+ap.add_argument("--friction", type=float, default=1.0, help="pads and objects; 1.0 with the simple gripper (the four-bar model needed 4)")
 ap.add_argument("--grip-k", type=float, default=6.0, help="gripper drive stiffness = squeeze force per rad of remaining closure")
 ap.add_argument("--candidates", type=int, default=40, help="grasps handed to the planner per pick")
 ap.add_argument("--temperature", type=float, default=0.3, help="softmax temperature on the grasp score for the random order")
 ap.add_argument("--out", type=Path, default=Path("/home/data/siddiquieu1/scene_previews/table_grasps"))
 ap.add_argument("--tag", default="")
+ap.add_argument("--gripper", default="simple", choices=["simple", "linkage"], help="simple: sliding physics pads (make_simple_gripper.py); linkage: the original four-bar model")
+ap.add_argument("--grip-force", type=float, default=20.0, help="squeeze force per pad with --gripper simple [N]")
 AppLauncher.add_app_launcher_args(ap)
 args = ap.parse_args()
 args.enable_cameras = True
@@ -139,16 +141,19 @@ planner = ArmPlanner(world, time_dilation=args.speed)
 HOME = planner.home
 
 cfg = EnvCfg()
+if args.gripper == "simple":
+    E.use_simple_gripper(cfg, grip_force=args.grip_force)
 cfg.scene.robot.init_state.joint_pos.update(dict(zip(n.ARM_JOINTS, map(float, HOME))))
-cfg.scene.robot.actuators["gripper"].stiffness = args.grip_k
-cfg.scene.robot.actuators["gripper"].damping = 0.05 * args.grip_k
+if args.gripper == "linkage":
+    cfg.scene.robot.actuators["gripper"].stiffness = args.grip_k
+    cfg.scene.robot.actuators["gripper"].damping = 0.05 * args.grip_k
 env = ManagerBasedRLEnv(cfg)
 env.reset()
 dev = env.device
 robot = env.scene["robot"]
 ARM_IDS = robot.find_joints(list(n.ARM_JOINTS), preserve_order=True)[0]
-FINGER_IDS = robot.find_joints(list(E.GRIPPER_DRIVEN), preserve_order=True)[0]
-PAD_IDS = robot.find_bodies(["left_inner_finger_pad", "right_inner_finger_pad"], preserve_order=True)[0]
+FINGER_IDS = robot.find_joints(list(E.GRIPPER_DRIVEN) if args.gripper == "linkage" else ["left_pad_slide", "right_pad_slide"], preserve_order=True)[0]
+PAD_IDS = robot.find_bodies(["left_inner_finger_pad", "right_inner_finger_pad"] if args.gripper == "linkage" else ["left_pad_phys", "right_pad_phys"], preserve_order=True)[0]
 objs = [env.scene[f"obj{i}"] for i in range(N)]
 
 
@@ -274,7 +279,7 @@ for trial in range(args.trials):
         pads_g = (np.linalg.inv(Tg) @ np.c_[pads, np.ones(2)].T).T[:, :3]
         moved_close = np.linalg.norm(pose_base(i)[:3] - p0[:3])
         print(f"      object moved {moved_pre * 1000:.0f} mm by the transit, {moved_app * 1000:.0f} mm after the approach, {moved_close * 1000:.0f} mm after closing; "
-              f"TCP error {tcp_e * 1000:.1f} mm; finger angles {np.round(fing, 2)}; pads in grasp frame [mm] {np.round(pads_g * 1000).astype(int).tolist()}", flush=True)
+              f"TCP error {tcp_e * 1000:.1f} mm; finger joints {np.round(fing, 3)} (rad, or m for the simple pads); pads in grasp frame [mm] {np.round(pads_g * 1000).astype(int).tolist()}", flush=True)
         with planner.relaxed(ignore=[f"obj{i}"]):
             here = planner.fk(state["q"])
             lift = planner.plan_cartesian(state["q"], here + np.r_[0, 0, 0.10, 0, 0, 0, 0], max_speed=0.05, quiet=True)
@@ -314,4 +319,9 @@ imageio.mimwrite(args.out / f"table_grasps{args.tag}.mp4", frames, fps=10, macro
 (args.out / f"table_grasps{args.tag}.json").write_text(json.dumps(picks, indent=1))
 print("video:", args.out / f"table_grasps{args.tag}.mp4", len(frames), "frames", flush=True)
 env.close()
-app.close()
+# Isaac Sim sometimes hangs in app.close() after a run (two such zombies held 22 GB of GPU 0 for hours): outputs are
+# written, so leave hard
+sys.stdout.flush()
+import os  # noqa: E402
+
+os._exit(0)

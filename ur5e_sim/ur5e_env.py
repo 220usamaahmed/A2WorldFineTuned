@@ -35,11 +35,12 @@ from isaaclab.utils import configclass
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))  # sibling modules import regardless of the working directory
-from gripper_action import MimicGripperPositionActionCfg  # noqa: E402  (tuned gripper controller, see its header)
+from gripper_action import MimicGripperPositionActionCfg, SimpleGripperActionCfg  # noqa: E402  (gripper controllers, see their headers)
 from joint_traj_action import JointTrajectoryActionCfg  # noqa: E402
 import robot_defs as n  # noqa: E402
 
 USD_PATH = HERE / "assets" / "usd" / "ur5e_gripper.usd"
+USD_PATH_SIMPLE = HERE / "assets" / "usd" / "ur5e_gripper_simple.usd"  # make_simple_gripper.py + convert_arm.py --simple
 
 # ---- geometry [m] ---------------------------------------------------------------------------------
 TABLE_Z = 0.75  # table top height; the arm base is mounted on the table top at the world origin
@@ -254,3 +255,29 @@ class Ur5eTableJointEnvCfg(Ur5eTableEnvCfg):
     """Same scene, arm driven by joint-space targets (JointActionsCfg) instead of the differential-IK TCP pose."""
 
     actions: JointActionsCfg = JointActionsCfg()
+
+
+# ---- simplified gripper physics (stage 2) ---------------------------------------------------------------
+SIMPLE_LEFT = {n.GRIPPER_DRIVEN_JOINT: 1.0, "left_inner_knuckle_joint": 1.0, "left_inner_finger_joint": -1.0}
+SIMPLE_RIGHT = {"right_outer_knuckle_joint": 1.0, "right_inner_knuckle_joint": 1.0, "right_inner_finger_joint": -1.0}
+
+
+def use_simple_gripper(cfg, grip_force: float = 20.0, pad_speed: float = 0.10):
+    """Switch an env cfg (any of the above) to the gripper with simplified physics: two sliding pads squeezing with
+    ``grip_force`` [N] each (the real 2F-85: 20-235 N; in PhysX, 20-30 N hold a 5 cm cube with <= 1.5 mm penetration,
+    40 N pushes the pads through it), closing at up to ``pad_speed`` [m/s] (real: 20-150 mm/s); the
+    Robotiq linkage is visual only and follows the pads (gripper_action.SimpleGripperAction). Same action meaning."""
+    r = cfg.scene.robot
+    r.spawn.usd_path = str(USD_PATH_SIMPLE)
+    r.init_state.joint_pos.update({"left_pad_slide": 0.0, "right_pad_slide": 0.0})
+    r.actuators = {
+        "arm_big": r.actuators["arm_big"],
+        "arm_wrist": r.actuators["arm_wrist"],
+        # stiff enough that 5 mm short of the target already gives the full force; the force limit sets the squeeze
+        "pads": ImplicitActuatorCfg(joint_names_expr=["left_pad_slide", "right_pad_slide"], stiffness=grip_force / 0.005,
+                                    damping=30.0, effort_limit_sim=grip_force, velocity_limit_sim=pad_speed),
+        "linkage": ImplicitActuatorCfg(joint_names_expr=list(SIMPLE_LEFT) + list(SIMPLE_RIGHT), stiffness=100.0, damping=5.0),
+    }
+    cfg.actions.gripper = SimpleGripperActionCfg(asset_name="robot", info_path=str(HERE / "assets" / "simple_gripper.json"),
+                                                 left_linkage=SIMPLE_LEFT, right_linkage=SIMPLE_RIGHT, coupling=0.005)
+    return cfg

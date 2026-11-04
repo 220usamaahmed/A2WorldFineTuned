@@ -37,8 +37,15 @@ PAD_GAP = np.array([86.0, 77.1, 67.4, 57.2, 46.6, 35.6, 24.3, 12.9, 1.5]) / 1000
 PAD_DZ = np.array([0.0, 3.5, 6.6, 9.2, 11.2, 12.8, 13.7, 14.1, 13.9]) / 1000
 
 
+PAD_DZ_LINKAGE = PAD_DZ  # the real / four-bar pad path (above)
+# The simulated gripper (make_simple_gripper.py) slides its physics pads on the straight line from open to closed, so
+# their travel along the approach axis is linear in the gap: 13.9 mm over 86 -> 1.5 mm (the visual linkage stays within
+# 4.7 mm of it). Grasps are placed for these pads.
+PAD_DZ = PAD_DZ[-1] * (PAD_GAP[0] - PAD_GAP) / (PAD_GAP[0] - PAD_GAP[-1])
+
+
 def closing_dz(width: float) -> float:
-    """How far the pads move along the approach axis while closing from open onto an object ``width`` wide."""
+    """How far the (simulated) pads move along the approach axis while closing from open onto an object ``width`` wide."""
     return float(np.interp(width, PAD_GAP[::-1], PAD_DZ[::-1]))
 
 

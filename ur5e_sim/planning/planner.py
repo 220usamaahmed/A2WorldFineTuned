@@ -206,8 +206,23 @@ class ArmPlanner:
 
     # ---------------------------------------------------------------- planning
     def plan_pose(self, q, p7, tag="to pose", quiet=False, **kw) -> Plan | None:
+        """Free-space plan to a TCP pose. If cuRobo's pose planning fails (it occasionally does, e.g. FINETUNE_TRAJOPT_FAIL
+        for a motion it planned fine before), IK at the pose and a joint-space plan (direct / straight joint line / via
+        home) to the nearest collision-free IK solutions."""
         res = self.mg.plan_single(self._js(q), self._pose(p7), self._cfg(**kw))
-        return self._to_plan(res, tag, quiet)
+        p = self._to_plan(res, tag, quiet=True)
+        if p is not None:
+            return p
+        ok, sol = self.ik_reachable(np.asarray(p7)[None], ref=q, n_solutions=4)
+        cands = sorted({tuple(np.round(e, 4)) for s_ in sol[0][ok[0]] for e in self.equivalents(s_, np.asarray(q, float))},
+                       key=lambda c: np.abs(np.array(c) - q).sum())
+        for c in cands[:4]:
+            p = self.plan_to_config(q, np.array(c), tag=f"{tag} (via IK)")
+            if p is not None:
+                return p
+        if not quiet:
+            print(f"   [planner] {tag}: FAILED ({res.status}; joint-space fallback to {len(cands)} IK solutions failed too)", flush=True)
+        return None
 
     def plan_joints(self, q, q_goal, tag="to joints", quiet=False, **kw) -> Plan | None:
         """Joint-space goal: cuRobo trajopt, else the straight joint-space line if it is collision-free (cuRobo's
