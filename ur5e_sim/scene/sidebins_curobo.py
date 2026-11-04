@@ -7,7 +7,12 @@ trajectories from planning/planner.py instead of interpolated TCP poses through 
   * free-space motions: cuRobo MotionGen with the table, the housings, the crates (at their current slide) and the
     objects (YCB meshes at their current poses) as obstacles; a carried object is attached to the robot;
   * approach / lift / pull / place moves: straight TCP lines (planner.plan_linear / plan_cartesian);
-  * grasp: top-down at the object (two candidates, fingers along +x or -x), chosen by planner.plan_grasp.
+  * grasp (--grasps rule): top-down at the object (fingers along +x or -x); (--grasps sampled): antipodal grasps from
+    planning/grasps.py at the object's simulated pose, in score-weighted random order; planner.plan_grasp picks one;
+  * place: the object goes down on the table in the orientation it rested in in the crate (so it is stable), straight
+    down from 10 cm above; several yaw rotations of the whole placement are offered to the planner.
+Objects (--objects): "cans" = a soup can standing in each crate (as sidebins_test.py); "mixed" = a different short YCB
+object per crate in a random resting pose and yaw (--seed).
 The planner's world is synced from the simulator before every phase.
 """
 import argparse
@@ -29,6 +34,10 @@ ap.add_argument("--slide-damping", type=float, default=15.0)
 ap.add_argument("--grip-k", type=float, default=6.0)
 ap.add_argument("--friction", type=float, default=4.0, help="pads and objects (the simulated squeeze is weak)")
 ap.add_argument("--can-y", default="-0.04,0.0,0.04", help="crate-local y of the soup can in each bin (sidebins_test.py: -0.04,0,0.04)")
+ap.add_argument("--objects", default="cans", help='"cans", "mixed" (061_foam_brick,009_gelatin_box,011_banana), or 3 comma-separated YCB keys')
+ap.add_argument("--grasps", default="rule", choices=["rule", "sampled"])
+ap.add_argument("--seed", type=int, default=0)
+ap.add_argument("--candidates", type=int, default=40, help="sampled grasps handed to the planner per pick")
 ap.add_argument("--out", type=Path, default=Path("/home/data/siddiquieu1/scene_previews/curobo"))
 ap.add_argument("--tag", default="")
 AppLauncher.add_app_launcher_args(ap)
@@ -52,7 +61,8 @@ sys.path.insert(0, str(HERE.parent / "planning"))
 import layout as L  # noqa: E402
 import robot_defs as n  # noqa: E402
 import ur5e_env as E  # noqa: E402
-from planner import ArmPlanner, Plan  # noqa: E402
+from grasps import T_from_pose7, cached_grasps, graspable_stable_poses, load_mesh, world_filter  # noqa: E402
+from planner import ArmPlanner, Plan, pregrasp  # noqa: E402
 
 BIN_USD = HERE.parent / "assets" / "usd" / "pullbin.usd"
 YCB = Path("/home/data/siddiquieu1/assets/Isaac/5.1/Isaac/Props/YCB/Axis_Aligned_Physics")
@@ -60,17 +70,49 @@ MESHES = Path("/home/data/siddiquieu1/assets/ycb_meshes")
 # table, in front of the arm (world x, y); a pulled-out crate reaches over the table to y = -0.17 (bin 2 spans x 0.27-0.67),
 # so the spots stay >= 5 cm clear of it (the old -0.12 left 14 mm between the can and the crate)
 PLACE_XY = [(0.40, 0.14), (0.40, 0.02), (0.40, -0.08)]
-# (name, usd, mesh, height, crate-local (x, y), yaw): stood up by +90 deg about x (the files' long axis is y)
-CAN = ("soup can", "005_tomato_soup_can.usd", "005_tomato_soup_can_physics.obj", 0.102)
-OBJECTS = [(*CAN, (0.10, float(y)), 0) for y in args.can_y.split(",")]
-Q_PICK = np.array([0.0, 1.0, 0.0, 0.0])  # tool down, fingers close along world x
-Q_PICK_FLIP = np.array([0.0, 0.0, 1.0, 0.0])  # tool down, fingers along -x (180 deg about z from Q_PICK)
-Q_HOOK = np.array([*R.from_matrix(np.stack([[0, 1, 0], [1, 0, 0], [0, 0, -1]], 1)).as_quat()[[3, 0, 1, 2]]])  # fingers along y
+PHYS = Path("/home/data/siddiquieu1/assets/ycb_physics")
+rng = np.random.default_rng(args.seed)
 
 
 def upright_quat(yaw_deg):
     x, y, z, w = (R.from_euler("z", yaw_deg, degrees=True) * R.from_euler("x", 90, degrees=True)).as_quat()
     return (float(w), float(x), float(y), float(z))
+
+
+def object_specs():
+    """Per bin: dict(key, usd, mesh, pose = world pose7 of the object resting in its (closed) crate)."""
+    out = []
+    if args.objects == "cans":  # standing upright (the files' long axis is y: +90 deg about x), as in sidebins_test.py
+        for i, y in enumerate(args.can_y.split(",")):
+            pos = L.crate_to_world(i, 0.10, float(y), L.FLOOR_TOP + 0.102 / 2 + 0.003)
+            out.append(dict(key="005_tomato_soup_can", usd=YCB / "005_tomato_soup_can.usd", mesh=MESHES / "005_tomato_soup_can_physics.obj",
+                            pose=np.r_[pos, upright_quat(0)]))
+        return out
+    keys = ["061_foam_brick", "009_gelatin_box", "011_banana"] if args.objects == "mixed" else args.objects.split(",")
+    for i, k in enumerate(keys):
+        m = load_mesh(MESHES / f"{k}.obj")
+        poses = graspable_stable_poses(m, cached_grasps(k, MESHES / f"{k}.obj", n_pairs=500, n_roll=16))
+        if not poses:
+            raise SystemExit(f"{k}: no resting pose in which the 2F-85 can grasp it")
+        Ts, ps, _ = zip(*poses)
+        T = np.array(Ts[rng.choice(len(Ts), p=np.array(ps) / sum(ps))])  # rests on z = 0
+        Rz = np.eye(4)
+        Rz[:3, :3] = R.from_euler("z", rng.uniform(0, 2 * np.pi)).as_matrix()
+        T = Rz @ T
+        # inside the roof window of a crate pulled out ~0.12-0.15 m, away from the walls
+        xc, yc = rng.uniform(0.06, 0.14), rng.uniform(-0.08, 0.08)
+        T[:3, 3] += L.crate_to_world(i, xc, yc, L.FLOOR_TOP + 0.003)
+        x, y, z, w = R.from_matrix(T[:3, :3]).as_quat()
+        out.append(dict(key=k, usd=PHYS / f"{k}.usd", mesh=MESHES / f"{k}.obj", pose=np.r_[T[:3, 3], w, x, y, z]))
+    return out
+
+
+SPECS = object_specs()
+for _s in SPECS:
+    print(f"object {_s['key']} at {np.round(_s['pose'][:3], 3)}", flush=True)
+Q_PICK = np.array([0.0, 1.0, 0.0, 0.0])  # tool down, fingers close along world x
+Q_PICK_FLIP = np.array([0.0, 0.0, 1.0, 0.0])  # tool down, fingers along -x (180 deg about z from Q_PICK)
+Q_HOOK = np.array([*R.from_matrix(np.stack([[0, 1, 0], [1, 0, 0], [0, 0, -1]], 1)).as_quat()[[3, 0, 1, 2]]])  # fingers along y
 
 
 def bin_cfg(i):
@@ -84,11 +126,11 @@ def bin_cfg(i):
 
 
 def obj_cfg(i):
-    name, usd, _, h, (xc, yc), yaw = OBJECTS[i]
+    sp = SPECS[i]
     return RigidObjectCfg(
         prim_path=f"{{ENV_REGEX_NS}}/obj{i}",
-        spawn=sim_utils.UsdFileCfg(usd_path=str(YCB / usd), rigid_props=sim_utils.RigidBodyPropertiesCfg(max_depenetration_velocity=1.0)),
-        init_state=RigidObjectCfg.InitialStateCfg(pos=tuple(L.crate_to_world(i, xc, yc, L.FLOOR_TOP + h / 2 + 0.003)), rot=upright_quat(yaw)),
+        spawn=sim_utils.UsdFileCfg(usd_path=str(sp["usd"]), rigid_props=sim_utils.RigidBodyPropertiesCfg(max_depenetration_velocity=1.0)),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=tuple(map(float, sp["pose"][:3])), rot=tuple(map(float, sp["pose"][3:]))),
     )
 
 
@@ -122,8 +164,8 @@ class EnvCfg(E.Ur5eTableJointEnvCfg):
 
 # ---------------------------------------------------------------- planner (before the env: the robot starts at its home)
 to_base = np.array([0.0, 0.0, L.TABLE_Z])
-objects0 = [(f"obj{i}", MESHES / OBJECTS[i][2], np.r_[L.crate_to_world(i, *OBJECTS[i][4], L.FLOOR_TOP + OBJECTS[i][3] / 2 + 0.003) - to_base,
-                                                        upright_quat(OBJECTS[i][5])]) for i in range(3)]
+objects0 = [(f"obj{i}", SPECS[i]["mesh"], np.r_[SPECS[i]["pose"][:3] - to_base, SPECS[i]["pose"][3:]]) for i in range(3)]
+GRASP_LIB = {sp["key"]: cached_grasps(sp["key"], sp["mesh"], n_pairs=500, n_roll=16) for sp in SPECS} if args.grasps == "sampled" else {}
 planner = ArmPlanner(L.world_config(objects=objects0), time_dilation=args.speed)
 HOME = planner.home
 print("planner ready; home", np.round(HOME, 3), flush=True)
@@ -228,6 +270,29 @@ def need(plan, what):
     return plan
 
 
+def _pose7(T):
+    x, y, z, w = R.from_matrix(T[:3, :3]).as_quat()
+    return np.r_[T[:3, 3], w, x, y, z]
+
+
+def grasp_candidates(i, p):
+    """TCP poses [N, 7] (base frame) to try for object i at pose p, best / random first, plus a label per candidate."""
+    if args.grasps == "rule":  # top-down at the centre, palm and wrist camera ~4 cm above the TCP
+        h = float(load_mesh(SPECS[i]["mesh"]).extents[1]) if SPECS[i]["key"] == "005_tomato_soup_can" else 0.0
+        gz = max(0.01, h / 2 - 0.042)
+        return np.array([np.r_[p[:3] + [0, 0, gz], q] for q in (Q_PICK, Q_PICK_FLIP)]), ["top-down +x", "top-down -x"]
+    G = GRASP_LIB[SPECS[i]["key"]]
+    Ts = T_from_pose7(p) @ np.array([g.T for g in G])
+    idx = np.where(world_filter(Ts, floor_z=L.FLOOR_TOP - L.TABLE_Z, min_clear=0.004, widths=[g.width for g in G]))[0]
+    if len(idx) == 0:
+        raise RuntimeError("no sampled grasp keeps the gripper above the crate floor")
+    sc = np.array([G[k].score for k in idx])
+    pr = np.exp((sc - sc.max()) / 0.3)
+    order = rng.choice(idx, size=min(args.candidates, len(idx)), replace=False, p=pr / pr.sum())
+    print(f"   {len(G)} sampled grasps, {len(idx)} keep the gripper above the crate floor, trying {len(order)}", flush=True)
+    return np.array([_pose7(Ts[k]) for k in order]), [f"sampled #{k} (width {G[k].width * 1000:.0f} mm)" for k in order]
+
+
 def recover(i):
     """After a failed phase: let go, back straight up out of the crate, go home; reset the arm if even that fails."""
     set_grip(0.0, steps=8)
@@ -252,7 +317,7 @@ def recover(i):
 hold(10)
 results = []
 for i in [int(b) for b in args.bins.split(",")]:
-    name, _, _, h, _, _ = OBJECTS[i]
+    name = SPECS[i]["key"]
     rec = dict(bin=i, object=name)
     print(f"\n=== bin {i} ({name}) ===", flush=True)
     try:
@@ -282,51 +347,65 @@ for i in [int(b) for b in args.bins.split(",")]:
         print(f"   crate pulled out {out:.3f} m (target {args.pull:.2f}); TCP error at the bar {e * 1000:.1f} mm", flush=True)
         rec.update(crate_out=round(out, 3), pulled_cmd=round(d, 3), opened=out > d - 0.01, tcp_err_hook_mm=round(e * 1000, 1))
 
-        # ---- 2. pick the object from above ----
+        # ---- 2. pick the object ----
         set_grip(0.0, steps=8)
         hold(5)
         sync_world()
         p = obj_pose_base(i)
-        z0 = p[2]
-        gz = max(0.01, h / 2 - 0.042)  # palm and wrist camera sit ~4 cm above the TCP
-        grasps = np.array([np.r_[p[:3] + [0, 0, gz], q] for q in (Q_PICK, Q_PICK_FLIP)])
-        to_pre, approach, gi = planner.plan_grasp(state["q"], grasps, approach=0.10, target=f"obj{i}")
+        grasps, meta = grasp_candidates(i, p)
+        to_pre, approach, gi = planner.plan_grasp(state["q"], grasps, approach=0.10, target=f"obj{i}",
+                                                  order="given" if args.grasps == "sampled" else "nearest", max_tries=10)
         need(approach, "grasp")
         run(to_pre, grip=0.0, name="to pregrasp")
         run(approach, name="approach")
         e = tcp_err(grasps[gi])
         set_grip(E.GRIPPER_CLOSED, steps=15, settle=4)
         with planner.relaxed(ignore=[f"obj{i}"]):
-            up = grasps[gi] + np.r_[0, 0, 0.10, 0, 0, 0, 0]
+            up = planner.fk(q_meas()) + np.r_[0, 0, 0.10, 0, 0, 0, 0]  # straight up, whatever the approach direction
             run(need(planner.plan_cartesian(state["q"], up, max_speed=0.05), "lift"), name="lift")
-        lifted = obj_pose_base(i)[2] - z0
-        print(f"   grasp candidate {gi}, TCP error at the grasp {e * 1000:.1f} mm, object lifted {lifted:.3f} m", flush=True)
-        rec.update(grasped=lifted > 0.08, tcp_err_grasp_mm=round(e * 1000, 1))
-        if lifted < 0.08:
+        lifted = obj_pose_base(i)[2] - p[2]
+        z_ax = T_from_pose7(grasps[gi])[:3, 2]
+        angle = float(np.degrees(np.arccos(np.clip(-z_ax[2], -1, 1))))
+        print(f"   grasp {meta[gi]} (approach {angle:.0f} deg from vertical), TCP error at the grasp {e * 1000:.1f} mm, object lifted {lifted:.3f} m", flush=True)
+        rec.update(grasp=meta[gi], approach_deg=round(angle, 1), grasped=lifted > 0.07, tcp_err_grasp_mm=round(e * 1000, 1))
+        if lifted < 0.07:
             raise RuntimeError("object not in the gripper")
 
-        # ---- 3. carry it to the table and put it down ----
+        # ---- 3. carry it to the table and put it down in the orientation it rested in ----
         sync_world()
         planner.set_obstacle_pose(f"obj{i}", obj_pose_base(i))
         assert planner.attach(state["q"], f"obj{i}")
-        T_tcp = planner.fk(q_meas())
-        obj_now = obj_pose_base(i)
-        dz_obj = obj_now[2] - T_tcp[2]  # object centre relative to the TCP (tool pointing down, object upright)
-        place_tcp = np.r_[PLACE_XY[i][0], PLACE_XY[i][1], h / 2 + 0.006 - dz_obj, T_tcp[3:]]
-        run(need(planner.plan_pose(state["q"], place_tcp + np.r_[0, 0, 0.10, 0, 0, 0, 0], tag="to the place point"), "carry"), name="carry")
+        T_tcp_obj = np.linalg.inv(T_from_pose7(planner.fk(q_meas()))) @ T_from_pose7(obj_pose_base(i))  # as held (incl. slip)
+        T_rest = T_from_pose7(p)
+        T_rest[2, 3] += -(L.FLOOR_TOP - L.TABLE_Z) + 0.004  # same height above the table as above the crate floor (+4 mm)
+        cands, objs_t = [], []
+        for yaw in np.radians([0, 60, -60, 120, -120, 180]):  # turn the whole placement about the vertical
+            Rz = np.eye(4)
+            Rz[:3, :3] = R.from_euler("z", yaw).as_matrix()
+            T_obj = Rz @ T_rest
+            T_obj[:2, 3] = PLACE_XY[i]
+            T_t = T_obj @ np.linalg.inv(T_tcp_obj)
+            cands.append(_pose7(T_t) + np.r_[0, 0, 0.10, 0, 0, 0, 0])
+            objs_t.append(T_obj)
+        carry, k = planner.plan_goalset(state["q"], np.array(cands), tag="to above the place point")
+        run(need(carry, "carry"), name="carry")
+        place_tcp = cands[k] - np.r_[0, 0, 0.10, 0, 0, 0, 0]
         run(need(planner.plan_linear(state["q"], place_tcp, frame="base", free_axis=2, max_speed=0.04), "put down"), name="put down")
         e_place = tcp_err(place_tcp)
         set_grip(0.0, steps=12, settle=6)
         planner.detach()
         sync_world()
-        with planner.relaxed(ignore=[f"obj{i}"]):
-            run(need(planner.plan_linear(state["q"], place_tcp + np.r_[0, 0, 0.10, 0, 0, 0, 0], frame="base", free_axis=2), "retreat"), name="retreat")
+        with planner.relaxed(ignore=[f"obj{i}"]):  # back out along the tool axis (not straight up: angled grasps)
+            run(need(planner.plan_cartesian(state["q"], pregrasp(place_tcp, 0.10)), "retreat"), name="retreat")
         hold(5)
         q = obj_pose_base(i)
-        upright = R.from_quat(q[3:7][[1, 2, 3, 0]]).apply([0, 1, 0])[2]
-        ok = abs(q[2] - h / 2) < 0.02 and np.hypot(q[0] - PLACE_XY[i][0], q[1] - PLACE_XY[i][1]) < 0.03 and upright > 0.9
-        print(f"   placed at {np.round(q[:3] + to_base, 3)}, upright {upright:.2f}, TCP error at the place point {e_place * 1000:.1f} mm -> {'PLACED' if ok else 'NOT PLACED'}", flush=True)
-        rec.update(placed=bool(ok), tcp_err_place_mm=round(e_place * 1000, 1))
+        T_now, T_goal = T_from_pose7(q), objs_t[k]
+        rot_err = float(np.degrees((R.from_matrix(T_now[:3, :3]) * R.from_matrix(T_goal[:3, :3]).inv()).magnitude()))
+        xy_err = float(np.hypot(*(T_now[:2, 3] - T_goal[:2, 3])))
+        ok = xy_err < 0.03 and abs(T_now[2, 3] - T_goal[2, 3]) < 0.015 and rot_err < 20
+        print(f"   placed at {np.round(q[:3] + to_base, 3)}: {xy_err * 1000:.0f} mm / {rot_err:.0f} deg from the target pose, "
+              f"TCP error at the place point {e_place * 1000:.1f} mm -> {'PLACED' if ok else 'NOT PLACED'}", flush=True)
+        rec.update(placed=bool(ok), place_xy_err_mm=round(xy_err * 1000, 1), place_rot_err_deg=round(rot_err, 1), tcp_err_place_mm=round(e_place * 1000, 1))
         sync_world()
         run(need(planner.plan_to_config(state["q"], HOME, tag="home"), "home"), name="home")
     except RuntimeError as ex:
