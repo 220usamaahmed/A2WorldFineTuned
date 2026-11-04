@@ -1,0 +1,40 @@
+# Assets used by the warehouse pick-and-place scene (paths relative to the Isaac asset root)
+# backdrop
+Environments/Simple_Warehouse/warehouse.usd
+Environments/Simple_Warehouse/warehouse_multiple_shelves.usd
+# tables
+Props/PackingTable/packing_table.usd
+Props/Mounts/SeattleLabTable/table_instanceable.usd
+Props/Mounts/ThorlabsTable/table_instanceable.usd
+# drawers
+Props/Sektion_Cabinet/sektion_cabinet_instanceable.usd
+# containers
+Props/KLT_Bin/small_KLT.usd
+Environments/Simple_Warehouse/Props/SM_CratePlastic_A_01.usd
+Environments/Simple_Warehouse/Props/SM_CratePlastic_B_01.usd
+Environments/Simple_Warehouse/Props/SM_BucketPlastic_B.usd
+# shelf pieces
+Environments/Simple_Warehouse/Props/SM_RackFrame_03.usd
+Environments/Simple_Warehouse/Props/SM_RackShelf_01.usd
+# objects
+Props/YCB/Axis_Aligned/
+Props/YCB/Axis_Aligned_Physics/
+Props/Mugs/
+Props/Food/mac_n_cheese.usd
+Environments/Simple_Warehouse/Props/SM_BottlePlasticA_01.usd
+Environments/Simple_Warehouse/Props/SM_BottlePlasticB_01.usd
+Environments/Simple_Warehouse/Props/SM_BottlePlasticC_01.usd
+Environments/Simple_Warehouse/Props/SM_BottlePlasticD_01.usd
+Environments/Simple_Warehouse/Props/SM_BottlePlasticE_01.usd
+Environments/Simple_Warehouse/Props/SM_CardBoxA_01.usd
+Environments/Simple_Warehouse/Props/SM_CardBoxB_01.usd
+# pull-out bin candidates
+Environments/Simple_Warehouse/Props/SM_CratePlastic_C_01.usd
+Environments/Simple_Warehouse/Props/SM_CratePlastic_D_01.usd
+Environments/Simple_Warehouse/Props/SM_CratePlastic_E_01.usd
+Environments/Simple_Warehouse/Props/SM_CratePlasticNote_A_01.usd
+Environments/Simple_Warehouse/Props/SM_CratePlasticNote_B_03.usd
+Props/PackingTable/props/SM_Crate_A07_Yellow_01/SM_Crate_A07_Yellow_01.usd
+Props/PackingTable/props/SM_Crate_A08_Blue_01/SM_Crate_A08_Blue_01.usd
+Props/PackingTable/props/container_h20/container_h20.usd
+Environments/Digital_Twin_Warehouse/Materials/Projects/gtc_sj_2020/original_assets/Sortbot_FBX/NormalKLT.usd
