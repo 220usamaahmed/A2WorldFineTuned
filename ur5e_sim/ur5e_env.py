@@ -36,6 +36,7 @@ from isaaclab.utils import configclass
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))  # sibling modules import regardless of the working directory
 from gripper_action import MimicGripperPositionActionCfg  # noqa: E402  (tuned gripper controller, see its header)
+from joint_traj_action import JointTrajectoryActionCfg  # noqa: E402
 import robot_defs as n  # noqa: E402
 
 USD_PATH = HERE / "assets" / "usd" / "ur5e_gripper.usd"
@@ -189,6 +190,17 @@ class ActionsCfg:
 
 
 @configclass
+class JointActionsCfg:
+    """Arm commanded in joint space (planned trajectories, see planning/), gripper as above. Action (dim 7):
+    [6 arm joint positions to reach at the end of the control step, in robot_defs.ARM_JOINTS order | finger angle]."""
+
+    arm = JointTrajectoryActionCfg(asset_name="robot", joint_names=list(n.ARM_JOINTS))
+    gripper = MimicGripperPositionActionCfg(
+        asset_name="robot", driven_joints=list(GRIPPER_DRIVEN), followers=GRIPPER_FOLLOWERS
+    )
+
+
+@configclass
 class ObservationsCfg:
     @configclass
     class PolicyCfg(ObsGroup):
@@ -235,3 +247,10 @@ class Ur5eTableEnvCfg(ManagerBasedRLEnvCfg):
         self.episode_length_s = 600.0  # scripted episodes must not be cut by the time-out
         self.viewer.eye = (1.6, -1.2, TABLE_Z + 0.9)
         self.viewer.lookat = (0.4, 0.0, TABLE_Z + 0.1)
+
+
+@configclass
+class Ur5eTableJointEnvCfg(Ur5eTableEnvCfg):
+    """Same scene, arm driven by joint-space targets (JointActionsCfg) instead of the differential-IK TCP pose."""
+
+    actions: JointActionsCfg = JointActionsCfg()

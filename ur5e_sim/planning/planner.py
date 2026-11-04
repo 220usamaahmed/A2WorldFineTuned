@@ -141,7 +141,9 @@ class ArmPlanner:
         self.mg.update_world(world)
 
     def set_obstacle_pose(self, name: str, p7):
-        self.mg.world_coll_checker.update_obstacle_pose(name, self._pose(p7))
+        # update_cpu_reference: attach_objects_to_robot fits the object's spheres from the CPU-side world model, so a
+        # pose updated only on the GPU puts the attached spheres where the object used to be
+        self.mg.world_coll_checker.update_obstacle_pose(name, self._pose(p7), update_cpu_reference=True)
 
     def enable_obstacle(self, name: str, on: bool = True):
         self.mg.world_coll_checker.enable_obstacle(name, on)
@@ -319,7 +321,7 @@ class ArmPlanner:
         return Plan(out, self.dt, tag)
 
     def plan_grasp(self, q, grasps: np.ndarray, approach: float = 0.10, target: str | None = None,
-                   max_tries: int = 8, n_branches: int = 4, transit_z: float = 0.35, tag="grasp"):
+                   max_tries: int = 8, n_branches: int = 4, transit_z: float = 0.35, order: str = "nearest", tag="grasp"):
         """Plan reaching one of ``grasps`` [N, 7] (TCP poses): a free-space joint motion to the pregrasp (``approach`` m
         back along the grasp's z axis), then a straight approach.
 
@@ -347,7 +349,10 @@ class ArmPlanner:
                         continue  # same solution found from another seed
                     seen.append(qe)
                     pairs.append((np.abs(qe - np.asarray(q)).sum() + 0.05 * gi, gi, qe))
-        pairs.sort(key=lambda t: t[0])
+        if order == "nearest":
+            pairs.sort(key=lambda t: t[0])
+        else:  # "given": grasps in the caller's order (e.g. shuffled for variety), each grasp's IK solutions nearest first
+            pairs.sort(key=lambda t: (t[1], t[0]))
         if not pairs:
             print(f"   [planner] {tag}: no collision-free IK for any of {len(grasps)} grasps", flush=True)
             return None, None, -1

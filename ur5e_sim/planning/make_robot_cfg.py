@@ -118,6 +118,9 @@ def main():
     for i, a in enumerate(grip):  # the gripper never collides with itself in a way we can plan around (fingers are locked)
         if grip[i + 1:]:
             ignore[a] = grip[i + 1:]
+    # a carried object (spheres attached at run time, MotionGen.attach_objects_to_robot) sits between the fingers
+    for a in [P + "wrist_3_link"] + grip:
+        ignore.setdefault(a, []).append("attached_object")
 
     arm_joints = list(n.ARM_JOINTS)
     cfg = {"robot_cfg": {"kinematics": {
@@ -128,16 +131,22 @@ def main():
         "ee_link": "grasp_frame",
         "link_names": None,
         "lock_joints": {n.GRIPPER_DRIVEN_JOINT: 0.0},
-        "extra_links": {"grasp_frame": {
-            "parent_link_name": n.EE_LINK, "link_name": "grasp_frame", "joint_name": "grasp_frame_joint", "joint_type": "FIXED",
-            "fixed_transform": [0.0, 0.0, float(n.TCP_OFFSET_Z), 1.0, 0.0, 0.0, 0.0],  # x y z qw qx qy qz
-        }},
-        "collision_link_names": list(spheres),
+        "extra_links": {
+            "grasp_frame": {
+                "parent_link_name": n.EE_LINK, "link_name": "grasp_frame", "joint_name": "grasp_frame_joint", "joint_type": "FIXED",
+                "fixed_transform": [0.0, 0.0, float(n.TCP_OFFSET_Z), 1.0, 0.0, 0.0, 0.0],  # x y z qw qx qy qz
+            },
+            "attached_object": {
+                "parent_link_name": n.EE_LINK, "link_name": "attached_object", "joint_name": "attach_joint", "joint_type": "FIXED",
+                "fixed_transform": [0.0, 0.0, float(n.TCP_OFFSET_Z), 1.0, 0.0, 0.0, 0.0],
+            },
+        },
+        "collision_link_names": list(spheres) + ["attached_object"],
         "collision_spheres": spheres,
         "collision_sphere_buffer": 0.002,
         "extra_collision_spheres": {"attached_object": 40},
         "self_collision_ignore": ignore,
-        "self_collision_buffer": {P + "shoulder_link": 0.01},
+        "self_collision_buffer": {P + "shoulder_link": 0.01, "attached_object": 0.0},
         "use_global_cumul": True,
         "mesh_link_names": [P + k for k in ARM_LINKS] + grip,
         "cspace": {
