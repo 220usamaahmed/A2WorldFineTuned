@@ -315,16 +315,21 @@ class ArmPlanner:
         for k in range(1, m + 1):
             xyzw = slerp([s[k]]).as_quat()[0]
             wp = np.r_[(1 - s[k]) * p0[:3] + s[k] * np.asarray(p7[:3]), xyzw[3], xyzw[:3]]
-            prev = self.tdt.to_device(torch.as_tensor(qs[-1], dtype=torch.float32))
-            r = self.ik_one.solve_single(self._pose(wp), retract_config=prev.view(1, -1), seed_config=prev.view(1, 1, -1))
-            if not bool(r.success.view(-1)[0]):
+            qk, why = self._ik_step(qs[-1], wp, max_joint_step)
+            if qk is None and why.startswith("joint jump") and float(why.split()[2]) < 0.4:
+                # a small jump: near a singularity the joints move fast; take the step in four sub-steps
+                xyzw0 = slerp([s[k - 1]]).as_quat()[0]
+                wp0 = np.r_[(1 - s[k - 1]) * p0[:3] + s[k - 1] * np.asarray(p7[:3]), xyzw0[3], xyzw0[:3]]
+                qk = qs[-1]
+                for f in (0.25, 0.5, 0.75, 1.0):
+                    wq = R.from_quat(np.stack([wp0[[4, 5, 6, 3]], wp[[4, 5, 6, 3]]]))
+                    xq = Slerp([0, 1], wq)([f]).as_quat()[0]
+                    qk, why = self._ik_step(qk, np.r_[(1 - f) * wp0[:3] + f * wp[:3], xq[3], xq[:3]], max_joint_step / 2)
+                    if qk is None:
+                        break
+            if qk is None:
                 if not quiet:
-                    print(f"   [planner] {tag}: FAILED (IK at {s[k]:.0%} of the path)", flush=True)
-                return None
-            qk = self.wrap_to(r.solution.view(-1)[: len(self.joint_names)].cpu().numpy(), qs[-1])
-            if np.abs(qk - qs[-1]).max() > max_joint_step:
-                if not quiet:
-                    print(f"   [planner] {tag}: FAILED (joint jump {np.abs(qk - qs[-1]).max():.2f} rad at {s[k]:.0%})", flush=True)
+                    print(f"   [planner] {tag}: FAILED ({why} at {s[k]:.0%} of the path)", flush=True)
                 return None
             qs.append(qk)
         qs = np.array(qs)
@@ -335,8 +340,21 @@ class ArmPlanner:
         out = np.stack([np.interp(prog, s, qs[:, j]) for j in range(qs.shape[1])], axis=1)
         return Plan(out, self.dt, tag)
 
+    def _ik_step(self, q_prev, wp, max_joint_step):
+        """One IK-chain step: (solution, "") or (None, reason)."""
+        prev = self.tdt.to_device(torch.as_tensor(q_prev, dtype=torch.float32))
+        r = self.ik_one.solve_single(self._pose(wp), retract_config=prev.view(1, -1), seed_config=prev.view(1, 1, -1))
+        if not bool(r.success.view(-1)[0]):
+            return None, "IK"
+        qk = self.wrap_to(r.solution.view(-1)[: len(self.joint_names)].cpu().numpy(), q_prev)
+        jump = float(np.abs(qk - np.asarray(q_prev)).max())
+        if jump > max_joint_step:
+            return None, f"joint jump {jump:.2f} rad"
+        return qk, ""
+
     def plan_grasp(self, q, grasps: np.ndarray, approach: float = 0.10, target: str | None = None,
-                   max_tries: int = 8, n_branches: int = 4, transit_z: float = 0.35, order: str = "nearest", tag="grasp"):
+                   max_tries: int = 8, n_branches: int = 4, transit_z: float = 0.35, order: str = "nearest", tag="grasp",
+                   approach_dir=None, check=None):
         """Plan reaching one of ``grasps`` [N, 7] (TCP poses): a free-space joint motion to the pregrasp (``approach`` m
         back along the grasp's z axis), then a straight approach.
 
@@ -350,8 +368,18 @@ class ArmPlanner:
         (Planning to the pregrasp *pose* lets cuRobo pick any branch; from some, the descent is impossible, e.g. with the
         wrist ending under a drawer housing's roof. And the nearest branch matters: reaching a wrist-flipped one means a
         full wrist reconfiguration among obstacles.)
+        ``approach_dir``: direction of the final straight motion in the base frame (default: along the grasp's own z
+        axis); e.g. (0, 0, -1) to lower a carried object onto a pose (placing works the same way as grasping).
+        ``check(index, plan_to_pregrasp, plan_approach)``: extra test before a candidate is accepted (e.g. that the
+        object can be lifted and pulled out of a shelf from that grasp); a candidate failing it is skipped.
         Returns (plan_to_pregrasp, plan_approach, index into grasps) or (None, None, -1)."""
         grasps = np.asarray(grasps, float).reshape(-1, 7)
+
+        def pre(gi):
+            return pregrasp(grasps[gi], approach, approach_dir)
+
+        def accept(gi, to_pre, app):
+            return check is None or bool(check(int(gi), to_pre, app))
         ign = [target] if target else []
         with self.relaxed(ign):
             ok, sol = self.ik_reachable(grasps, ref=q, n_solutions=n_branches)
@@ -374,19 +402,24 @@ class ArmPlanner:
         lines = []
         for _, gi, qg in pairs[:max_tries]:
             with self.relaxed(ign):
-                back = self.plan_cartesian(qg, pregrasp(grasps[gi], approach), tag=f"{tag} #{gi}: retreat line", quiet=not self.verbose)
+                back = self.plan_cartesian(qg, pre(gi), tag=f"{tag} #{gi}: retreat line", quiet=not self.verbose)
             if back is None:
                 continue
             lines.append((gi, back))
             to_pre = self.plan_joints(q, back.q[-1], tag=f"{tag} #{gi}: to pregrasp", quiet=True)
             if to_pre is not None:
-                return to_pre, Plan(back.q[::-1].copy(), back.dt, f"{tag} #{gi}: approach"), int(gi)
+                app = Plan(back.q[::-1].copy(), back.dt, f"{tag} #{gi}: approach")
+                if accept(gi, to_pre, app):
+                    return to_pre, app, int(gi)
+                lines.pop()  # fails the caller's check whatever the way to the pregrasp
         for gi, back in lines[:3]:  # second chance: via home
             to_pre = self.plan_to_config(q, back.q[-1], tag=f"{tag} #{gi}: to pregrasp")
             if to_pre is not None:
-                return to_pre, Plan(back.q[::-1].copy(), back.dt, f"{tag} #{gi}: approach"), int(gi)
+                app = Plan(back.q[::-1].copy(), back.dt, f"{tag} #{gi}: approach")
+                if accept(gi, to_pre, app):
+                    return to_pre, app, int(gi)
         for gi, back in lines[:3]:  # third: straight down from transit height, on the pregrasp's IK branch
-            pre7 = pregrasp(grasps[gi], approach)
+            pre7 = pre(gi)
             if pre7[2] >= transit_z - 0.02:
                 continue
             top7 = np.r_[pre7[:2], transit_z, pre7[3:]]
@@ -396,7 +429,9 @@ class ArmPlanner:
             to_top = self.plan_to_config(q, up.q[-1], tag=f"{tag} #{gi}: to transit")
             if to_top is not None:
                 down = Plan(up.q[::-1].copy(), up.dt, "down")
-                return to_top + down, Plan(back.q[::-1].copy(), back.dt, f"{tag} #{gi}: approach"), int(gi)
+                app = Plan(back.q[::-1].copy(), back.dt, f"{tag} #{gi}: approach")
+                if accept(gi, to_top + down, app):
+                    return to_top + down, app, int(gi)
         print(f"   [planner] {tag}: no feasible approach ({len(pairs)} IK solutions, {len(lines)} straight lines)", flush=True)
         return None, None, -1
 
@@ -440,11 +475,12 @@ def resample(q: np.ndarray, dt_in: float, dt_out: float) -> np.ndarray:
     return np.stack([np.interp(t, ti, q[:, j]) for j in range(q.shape[1])], axis=1)
 
 
-def pregrasp(g7, d) -> np.ndarray:
-    """Pose d metres back along the TCP's own z axis (the approach direction) from g7."""
+def pregrasp(g7, d, direction=None) -> np.ndarray:
+    """Pose d metres back from g7 against the approach direction: the TCP's own z axis, or ``direction`` (base frame)."""
     from scipy.spatial.transform import Rotation as R
 
-    z = R.from_quat(np.asarray(g7[3:7])[[1, 2, 3, 0]]).as_matrix()[:, 2]
+    z = R.from_quat(np.asarray(g7[3:7])[[1, 2, 3, 0]]).as_matrix()[:, 2] if direction is None else np.asarray(direction, float)
+    z = z / np.linalg.norm(z)
     return np.r_[np.asarray(g7[:3]) - d * z, g7[3:7]]
 
 

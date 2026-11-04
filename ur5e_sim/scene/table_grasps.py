@@ -222,7 +222,7 @@ def go_home():
     if p is not None:
         run(p)
         return True
-    robot.write_joint_state_to_sim(torch.tensor([list(HOME)], device=dev), torch.zeros(1, 6, device=dev), joint_ids=ARM_IDS)
+    robot.write_joint_state_to_sim(torch.tensor([list(map(float, HOME))], dtype=torch.float32, device=dev), torch.zeros(1, 6, device=dev), joint_ids=ARM_IDS)
     state["q"] = np.array(HOME, float)
     env.action_manager.get_term("arm").reset()
     hold(5)

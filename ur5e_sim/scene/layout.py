@@ -94,11 +94,65 @@ def table_box(frame: str = "base"):
     return ("table", np.array([0.0, 0.0, TABLE_Z / 2 - dz]), np.array([TABLE_SIZE[0], TABLE_SIZE[1], TABLE_Z]))
 
 
-def world_config(bins=(0, 1, 2), slides=(0.0, 0.0, 0.0), objects=()):
+# ---- shelf (opposite the drawers, +y side): two levels, open top, wooden boards like the housings ----
+SHELF_FRONT_Y = 0.32  # just behind the container's far wall (the table edge is at +0.30)
+SHELF_DEPTH = 0.30  # inner depth (y)
+SHELF_X = (-0.45, 0.45)  # outer x extent
+SHELF_LEVELS = (TABLE_Z + 0.15, TABLE_Z + 0.47)  # top faces of the two boards (world z), 0.30 m clear between them. Not at table height: side grasps 8-12 cm above the table put the wrist into it (straight retreats failed for 74 of 80 grasps)
+SHELF_SIDE_H = 1.50  # top of the side walls (world z)
+SHELF_BOXES = {  # name: (lo, hi) in the world frame
+    "plinth": ((SHELF_X[0], SHELF_FRONT_Y, 0.0), (SHELF_X[1], SHELF_FRONT_Y + SHELF_DEPTH, SHELF_LEVELS[0] - T)),
+    "board0": ((SHELF_X[0] + T, SHELF_FRONT_Y, SHELF_LEVELS[0] - T), (SHELF_X[1] - T, SHELF_FRONT_Y + SHELF_DEPTH, SHELF_LEVELS[0])),
+    "board1": ((SHELF_X[0] + T, SHELF_FRONT_Y, SHELF_LEVELS[1] - T), (SHELF_X[1] - T, SHELF_FRONT_Y + SHELF_DEPTH, SHELF_LEVELS[1])),
+    "side_l": ((SHELF_X[0], SHELF_FRONT_Y, 0.0), (SHELF_X[0] + T, SHELF_FRONT_Y + SHELF_DEPTH, SHELF_SIDE_H)),
+    "side_r": ((SHELF_X[1] - T, SHELF_FRONT_Y, 0.0), (SHELF_X[1], SHELF_FRONT_Y + SHELF_DEPTH, SHELF_SIDE_H)),
+    "back": ((SHELF_X[0], SHELF_FRONT_Y + SHELF_DEPTH, 0.0), (SHELF_X[1], SHELF_FRONT_Y + SHELF_DEPTH + T, SHELF_SIDE_H)),
+}
+SHELF_SPOTS_X = (-0.32, -0.11, 0.11, 0.32)  # nominal object x positions on a level (jittered per episode)
+SHELF_SPOTS_Y = (SHELF_FRONT_Y + 0.05, SHELF_FRONT_Y + 0.14)  # object centre y range on a level
+
+# ---- container: Isaac's shallow grey tray (Props/PackingTable/props/container_h20), on the table at the +x end ----
+# 0.612 x 0.412 x 0.09 m, origin at the bottom centre, long side along x, its +x edge flush with the table's +x end.
+# Across the table it has to fit between a pulled-out crate (reaches y = -0.17) and the shelf (y >= 0.32).
+CONTAINER_USD = "Props/PackingTable/props/container_h20/container_h20.usd"
+CONTAINER_POS = (TABLE_SIZE[0] / 2 - 0.306, 0.105, TABLE_Z)  # world
+CONTAINER_BOXES = {  # its own box colliders (from the USD), container frame
+    "floor": ((-0.3, -0.2, 0.0005), (0.3, 0.2, 0.0085)),
+    "wall_yp": ((-0.3, 0.1925, 0.01), (0.3, 0.2075, 0.09)),
+    "wall_ym": ((-0.3, -0.2075, 0.01), (0.3, -0.1925, 0.09)),
+    "wall_xm": ((-0.3075, -0.19, 0.01), (-0.2925, 0.19, 0.09)),
+    "wall_xp": ((0.2925, -0.19, 0.01), (0.3075, 0.19, 0.09)),
+}
+CONTAINER_FLOOR_TOP = TABLE_Z + 0.0085  # world z
+CONTAINER_INNER = ((CONTAINER_POS[0] - 0.2925, CONTAINER_POS[0] + 0.2925), (CONTAINER_POS[1] - 0.1925, CONTAINER_POS[1] + 0.1925))
+CONTAINER_DROP_X = (CONTAINER_INNER[0][0], CONTAINER_POS[0] + 0.05)  # the far half of the tray is out of the arm's reach
+
+
+def shelf_boxes(frame: str = "base"):
+    dz = TABLE_Z if frame == "base" else 0.0
+    out = []
+    for nm, (lo, hi) in SHELF_BOXES.items():
+        lo, hi = np.asarray(lo, float), np.asarray(hi, float)
+        out.append((f"shelf_{nm}", (lo + hi) / 2 - [0, 0, dz], hi - lo))
+    return out
+
+
+def container_boxes(frame: str = "base"):
+    dz = TABLE_Z if frame == "base" else 0.0
+    out = []
+    for nm, (lo, hi) in CONTAINER_BOXES.items():
+        lo, hi = np.asarray(lo, float), np.asarray(hi, float)
+        out.append((f"container_{nm}", (lo + hi) / 2 + np.asarray(CONTAINER_POS) - [0, 0, dz], hi - lo))
+    return out
+
+
+def world_config(bins=(0, 1, 2), slides=(0.0, 0.0, 0.0), objects=(), shelf=False, container=False):
     """cuRobo WorldConfig in the base frame. ``objects``: [(name, obj_file, pose7 in the base frame)]."""
     from curobo.geom.types import Cuboid, Mesh, WorldConfig
 
     boxes = [table_box()] + [b for i in bins for b in bin_boxes(i, slides[i])]
+    boxes += shelf_boxes() if shelf else []
+    boxes += container_boxes() if container else []
     cub = [Cuboid(name=nm, pose=[*map(float, c), 1.0, 0.0, 0.0, 0.0], dims=[*map(float, d)]) for nm, c, d in boxes]
     meshes = [Mesh(name=nm, file_path=str(f), pose=[*map(float, p)]) for nm, f, p in objects]
     return WorldConfig(cuboid=cub, mesh=meshes)
