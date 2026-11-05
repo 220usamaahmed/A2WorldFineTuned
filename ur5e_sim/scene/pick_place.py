@@ -43,6 +43,9 @@ ap.add_argument("--drawer-objects", default="", help="3 YCB keys, one per crate 
 ap.add_argument("--shelf-objects", default="", help="4 YCB keys, 2 per level (default: random from the tall set)")
 ap.add_argument("--out", type=Path, default=Path("/home/data/siddiquieu1/scene_previews/pick_place"))
 ap.add_argument("--tag", default="")
+ap.add_argument("--stills", action="store_true",
+                help="only render high-resolution stills of the scene (crates closed, then pulled out) to --out, then exit")
+ap.add_argument("--stills-size", default="1920x1080", help="WxH of the stills")
 AppLauncher.add_app_launcher_args(ap)
 args = ap.parse_args()
 args.enable_cameras = True
@@ -233,7 +236,23 @@ objects0 = [(f"obj{i}", MESHES / f"{KEYS[i]}.obj", np.r_[layout0[i][:3] - to_bas
 planner = ArmPlanner(L.world_config(objects=objects0, shelf=True, container=True), time_dilation=args.speed)
 HOME = planner.home
 
+# --stills: extra high-resolution cameras, name -> (eye, look-at, focal length [mm]), world frame
+STILLS = {
+    "front": ((0.9, -2.5, 2.3), (0.0, 0.0, 0.85), 18.0),
+    "front_high": ((1.2, -1.9, 2.9), (0.0, 0.0, 0.8), 18.0),
+    "end_px": ((2.4, -0.4, 2.4), (0.0, -0.05, 0.85), 18.0),
+    "end_nx": ((-2.4, -0.6, 2.4), (0.0, -0.05, 0.85), 18.0),
+    "top": ((0.0, -0.6, 3.6), (0.0, 0.0, 0.75), 14.0),
+    "shelf": ((-0.35, -0.25, 1.55), (0.0, 0.47, 1.05), 14.0),
+    "drawers": ((0.6, 0.15, 1.95), (-0.05, -0.62, 0.8), 16.0),
+}
 cfg = EnvCfg()
+if args.stills:
+    sw, sh = map(int, args.stills_size.lower().split("x"))
+    for nm, (eye, look, focal) in STILLS.items():
+        c = E._camera(f"still_{nm}", eye, focal, rot=E.look_at_quat(eye, look))
+        c.width, c.height, c.update_period = sw, sh, 0.0
+        setattr(cfg.scene, f"still_{nm}", c)
 E.use_simple_gripper(cfg, grip_force=args.grip_force)
 cfg.scene.robot.init_state.joint_pos.update(dict(zip(n.ARM_JOINTS, map(float, HOME))))
 env = ManagerBasedRLEnv(cfg)
@@ -502,8 +521,35 @@ def go_home():
     return "arm reset (not a planned motion)"
 
 
-# ---------------------------------------------------------------- episodes
+# ---------------------------------------------------------------- stills (--stills): the scene at an episode start
 args.out.mkdir(parents=True, exist_ok=True)
+if args.stills:
+    import os
+
+    def save_stills(state_tag):
+        for nm in STILLS:
+            img = env.scene[f"still_{nm}"].data.output["rgb"][0].cpu().numpy()[..., :3].astype(np.uint8)
+            path = args.out / f"still_{nm}_{state_tag}{args.tag}.png"
+            imageio.imwrite(path, img)
+            print("wrote", path, flush=True)
+
+    reset_episode()
+    hold(20)  # a few more rendered frames, so the renderer has converged
+    save_stills("closed")
+    PULL = 0.15
+    for i in range(3):  # pull the crates out (housing +x = world +y) and move their objects with them
+        BINS[i].write_joint_state_to_sim(torch.tensor([[PULL]], device=dev), torch.zeros(1, 1, device=dev))
+        p = OBJS[i].data.root_pose_w.clone()
+        p[0, 1] += PULL
+        OBJS[i].write_root_pose_to_sim(p)
+        OBJS[i].write_root_velocity_to_sim(torch.zeros(1, 6, device=dev))
+    hold(25)
+    save_stills("open")
+    env.close()
+    sys.stdout.flush()
+    os._exit(0)
+
+# ---------------------------------------------------------------- episodes
 records = []
 for ep in range(args.episodes):
     reset_episode()

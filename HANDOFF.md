@@ -48,7 +48,12 @@ Made after the seed-2 run and committed with this handoff (1e4893f):
    `collect.py`), camera choice for the world model, episode variety.
 
 ## This machine (RTX 4080 SUPER, set up 2026-11-05)
-Set up and smoke-tested; the seed-3 validation (next steps, 1.) has not been run yet.
+Set up and smoke-tested. **Seed 3** (`pick_place.py --episodes 8 --seed 3 --tag _s3`, 30 N cap, new cameras): **7/8**.
+All 4 drawer episodes OK (soup can x2, potted meat can x2, 0-12 mm). Shelf: bleach (49 mm / 8 deg off), mustard x2;
+episode 7 failed: sugar box, mustard, cracker box had no plan and the bleach slipped (36 mm in the hand), i.e. open
+problems 2 and 3. One soup can landed tilted 20 deg. Clean exit, no GPU memory left (the crash hard-exit itself was
+not triggered). Cameras: A (`EYE_A`) shows shelf front, drawers, tray and arm; B (`EYE_B`, +x end) sees the tray but the
+shelf's side wall hides the shelf contents and most of a shelf pick. Both leave half the frame to floor and sky.
 * **Env: `/home/data/siddiquieu1/envs/env_a2world`** (`conda activate /home/data/siddiquieu1/envs/env_a2world`), a clone
   of `env_isaaclab` with the pinned cuRobo. Don't install this project's cuRobo into `env_isaaclab`: steve_il uses that
   env with the new cuRobo v0.8 (`~/curobo`, different API, same package name). Isaac Lab is shared (editable `~/IsaacLab`).
