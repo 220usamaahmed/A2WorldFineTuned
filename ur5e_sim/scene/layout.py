@@ -42,10 +42,11 @@ ROOF_FRONT_Y = ORIGIN_Y + ROOF_X[1]  # world y of the roofs' front edge (the cou
 # ~0.15 m, the object is under the roof opening and the gripper clears the roof edge
 CRATE_OBJ_XC = (0.10, 0.18)
 CRATE_OBJ_YC = (-0.08, 0.08)
-# cosmetic: solid counter ends that continue the three housings to the table's width (no drawers in them), world frame
+# cosmetic solid fillers (scene + planner world): counter ends that continue the three housings to the table's width (no
+# drawers in them), and (below, after the shelf) a strip that closes the gap between the table and the shelf; world frame
 _HX = (BIN_X[0] - W, BIN_X[2] + W)  # outer x of the housings
 _HY = (ORIGIN_Y + BACK_X - T, ORIGIN_Y + FRONT_X)  # back and front y of the housings
-COUNTER_END_BOXES = {
+FILLER_BOXES = {
     "end_l": ((-TABLE_SIZE[0] / 2, _HY[0], 0.0), (_HX[0], _HY[1], COUNTER_Z)),
     "end_r": ((_HX[1], _HY[0], 0.0), (TABLE_SIZE[0] / 2, _HY[1], COUNTER_Z)),
 }
@@ -126,13 +127,14 @@ SHELF_BOXES = {  # name: (lo, hi) in the world frame
 }
 SHELF_SPOTS_X = (-0.32, -0.11, 0.11, 0.32)  # nominal object x positions on a level (jittered per episode)
 SHELF_SPOTS_Y = (SHELF_FRONT_Y + 0.05, SHELF_FRONT_Y + 0.14)  # object centre y range on a level
+FILLER_BOXES["table_strip"] = ((-TABLE_SIZE[0] / 2, TABLE_SIZE[1] / 2, 0.0), (TABLE_SIZE[0] / 2, SHELF_FRONT_Y, TABLE_Z))  # table edge -> shelf front
 
 # ---- container: Isaac's shallow grey tray (Props/PackingTable/props/container_h20), on the counter ----
 # 0.612 x 0.412 x 0.09 m, origin at the bottom centre, long side along x. It stands on the drawer housings' roofs like
 # on a shop counter (the customer is beyond the drawers, at -y), centred on the middle housing, its arm-side wall
 # CONTAINER_SETBACK + 1 cm behind the roof opening (towards the customer).
 CONTAINER_USD = "Props/PackingTable/props/container_h20/container_h20.usd"
-CONTAINER_SETBACK = 0.08  # not yet checked for reachability of the drop poses (was 0)
+CONTAINER_SETBACK = 0.04  # 0.08 put the drop poses out of reach for an upright soup can (seed 3, episode 0)
 CONTAINER_POS = (0.0, ROOF_FRONT_Y - 0.2075 - 0.01 - CONTAINER_SETBACK, COUNTER_Z)  # world
 CONTAINER_BOXES = {  # its own box colliders (from the USD), container frame
     "floor": ((-0.3, -0.2, 0.0005), (0.3, 0.2, 0.0085)),
@@ -165,23 +167,23 @@ def container_boxes(frame: str = "base"):
     return out
 
 
-def counter_end_boxes(frame: str = "base"):
+def filler_boxes(frame: str = "base"):
     dz = TABLE_Z if frame == "base" else 0.0
     out = []
-    for nm, (lo, hi) in COUNTER_END_BOXES.items():
+    for nm, (lo, hi) in FILLER_BOXES.items():
         lo, hi = np.asarray(lo, float), np.asarray(hi, float)
-        out.append((f"counter_{nm}", (lo + hi) / 2 - [0, 0, dz], hi - lo))
+        out.append((f"filler_{nm}", (lo + hi) / 2 - [0, 0, dz], hi - lo))
     return out
 
 
-def world_config(bins=(0, 1, 2), slides=(0.0, 0.0, 0.0), objects=(), shelf=False, container=False, counter_ends=False):
+def world_config(bins=(0, 1, 2), slides=(0.0, 0.0, 0.0), objects=(), shelf=False, container=False, fillers=False):
     """cuRobo WorldConfig in the base frame. ``objects``: [(name, obj_file, pose7 in the base frame)]."""
     from curobo.geom.types import Cuboid, Mesh, WorldConfig
 
     boxes = [table_box()] + [b for i in bins for b in bin_boxes(i, slides[i])]
     boxes += shelf_boxes() if shelf else []
     boxes += container_boxes() if container else []
-    boxes += counter_end_boxes() if counter_ends else []
+    boxes += filler_boxes() if fillers else []
     cub = [Cuboid(name=nm, pose=[*map(float, c), 1.0, 0.0, 0.0, 0.0], dims=[*map(float, d)]) for nm, c, d in boxes]
     meshes = [Mesh(name=nm, file_path=str(f), pose=[*map(float, p)]) for nm, f, p in objects]
     return WorldConfig(cuboid=cub, mesh=meshes)

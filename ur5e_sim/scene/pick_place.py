@@ -216,8 +216,9 @@ class SceneCfg(E.SceneCfg):
     shelf_side_l = board_cfg("side_l", *_SB["side_l"])
     shelf_side_r = board_cfg("side_r", *_SB["side_r"])
     shelf_back = board_cfg("back", *_SB["back"])
-    counter_end_l = board_cfg("end_l", *L.COUNTER_END_BOXES["end_l"], prefix="counter")
-    counter_end_r = board_cfg("end_r", *L.COUNTER_END_BOXES["end_r"], prefix="counter")
+    counter_end_l = board_cfg("end_l", *L.FILLER_BOXES["end_l"], prefix="filler")
+    counter_end_r = board_cfg("end_r", *L.FILLER_BOXES["end_r"], prefix="filler")
+    filler_table_strip = board_cfg("table_strip", *L.FILLER_BOXES["table_strip"], prefix="filler")
     container = AssetBaseCfg(prim_path="{ENV_REGEX_NS}/container", spawn=sim_utils.UsdFileCfg(usd_path=str(ISAAC / L.CONTAINER_USD)),
                              init_state=AssetBaseCfg.InitialStateCfg(pos=L.CONTAINER_POS))
     obj0: RigidObjectCfg = obj_cfg(0)
@@ -237,7 +238,7 @@ class EnvCfg(E.Ur5eTableJointEnvCfg):
 
 
 objects0 = [(f"obj{i}", MESHES / f"{KEYS[i]}.obj", np.r_[layout0[i][:3] - to_base, layout0[i][3:]]) for i in range(7)]
-planner = ArmPlanner(L.world_config(objects=objects0, shelf=True, container=True, counter_ends=True), time_dilation=args.speed)
+planner = ArmPlanner(L.world_config(objects=objects0, shelf=True, container=True, fillers=True), time_dilation=args.speed)
 HOME = planner.home
 
 # --stills: extra high-resolution cameras, name -> (eye, look-at, focal length [mm]), world frame
