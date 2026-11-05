@@ -219,6 +219,7 @@ class SceneCfg(E.SceneCfg):
     counter_end_l = board_cfg("end_l", *L.FILLER_BOXES["end_l"], prefix="filler")
     counter_end_r = board_cfg("end_r", *L.FILLER_BOXES["end_r"], prefix="filler")
     filler_table_strip = board_cfg("table_strip", *L.FILLER_BOXES["table_strip"], prefix="filler")
+    filler_table_strip_front = board_cfg("table_strip_front", *L.FILLER_BOXES["table_strip_front"], prefix="filler")
     container = AssetBaseCfg(prim_path="{ENV_REGEX_NS}/container", spawn=sim_utils.UsdFileCfg(usd_path=str(ISAAC / L.CONTAINER_USD)),
                              init_state=AssetBaseCfg.InitialStateCfg(pos=L.CONTAINER_POS))
     obj0: RigidObjectCfg = obj_cfg(0)

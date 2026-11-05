@@ -79,6 +79,12 @@ no longer clears the roof edge when hooking the rim bar), and crate objects star
 Results: seed 2 8/8, seed 3 7/8 (same as main: 8/8, 7/8); placements tighter (<= 14 mm, <= 3 deg). The one failure is a
 bin-2 potted meat can with no feasible grasp approach (open problem 4, now with a narrower opening). Planner-only
 `test_shelf_container.py`: 16/32 (main 19/32). Stills: `/home/data/siddiquieu1/scene_previews/stills_counter/`.
+Later on this branch: shelf and counter (solid filler ends) span the table's width, filler strips close the gaps to
+the shelf and to the housings (`layout.FILLER_BOXES`, cosmetic but in the planner world); the housings stand 4 cm beyond
+the table edge (`layout.HOUSING_GAP`) so the middle crate, right in front of the arm base, can be pulled the full 0.15 m
+(before: only 0.12 m, and its object was then often ungraspable under the 12 cm opening); the tray stays where it was
+(`CONTAINER_SETBACK` 0; 8 cm further back put the drops out of reach). Seed 3 8/8, seed 2 7/8 (a pudding box in bin 0,
+no feasible grasp). Runs: `/home/data/siddiquieu1/scene_previews/pick_place_counter_v4/`.
 
 ## Setting up on a new machine
 1. Clone with the submodule: `git clone --recurse-submodules git@github.com:220usamaahmed/A2WorldFineTuned.git`.

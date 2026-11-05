@@ -15,7 +15,10 @@ import numpy as np
 
 TABLE_Z = 0.75
 TABLE_SIZE = (1.8, 0.6)  # x, y; centred on the arm base
-TABLE_EDGE_Y = -0.30  # the housings stand against this edge
+TABLE_EDGE_Y = -0.30  # the table's edge on the drawer side
+# the housings stand HOUSING_GAP beyond the table edge (a filler strip closes the gap): pulled out 0.15 m, the middle
+# crate (in front of the arm base) otherwise comes so close to the base that only 0.12 m could be planned
+HOUSING_GAP = 0.04
 
 # ---- build_pullbin.py ----
 Z_B = TABLE_Z  # housing base plate top
@@ -33,7 +36,7 @@ SLIDE_MAX = 0.35
 # ---- placement (sidebins_test.py) ----
 PITCH = 2 * W
 BIN_X = (-PITCH, 0.0, PITCH)
-ORIGIN_Y = TABLE_EDGE_Y - FRONT_X
+ORIGIN_Y = TABLE_EDGE_Y - HOUSING_GAP - FRONT_X
 FLOOR_TOP = Z_B + CRATE_Z0 + FLOOR_T  # inside floor of a crate (world z)
 WALL_Y = ORIGIN_Y + 0.5 * (WALL_IN_X + BAR_OUT_X)  # middle of the crate's front end wall incl. rim bar (world y), closed
 BAR_Z = Z_B + CRATE_Z0 + 0.5 * (BAR_Z0 + CH)  # middle of the rim bar (world z)
@@ -128,13 +131,14 @@ SHELF_BOXES = {  # name: (lo, hi) in the world frame
 SHELF_SPOTS_X = (-0.32, -0.11, 0.11, 0.32)  # nominal object x positions on a level (jittered per episode)
 SHELF_SPOTS_Y = (SHELF_FRONT_Y + 0.05, SHELF_FRONT_Y + 0.14)  # object centre y range on a level
 FILLER_BOXES["table_strip"] = ((-TABLE_SIZE[0] / 2, TABLE_SIZE[1] / 2, 0.0), (TABLE_SIZE[0] / 2, SHELF_FRONT_Y, TABLE_Z))  # table edge -> shelf front
+FILLER_BOXES["table_strip_front"] = ((-TABLE_SIZE[0] / 2, _HY[1], 0.0), (TABLE_SIZE[0] / 2, TABLE_EDGE_Y, TABLE_Z))  # housing fronts -> table edge
 
 # ---- container: Isaac's shallow grey tray (Props/PackingTable/props/container_h20), on the counter ----
 # 0.612 x 0.412 x 0.09 m, origin at the bottom centre, long side along x. It stands on the drawer housings' roofs like
 # on a shop counter (the customer is beyond the drawers, at -y), centred on the middle housing, its arm-side wall
 # CONTAINER_SETBACK + 1 cm behind the roof opening (towards the customer).
 CONTAINER_USD = "Props/PackingTable/props/container_h20/container_h20.usd"
-CONTAINER_SETBACK = 0.04  # 0.08 put the drop poses out of reach for an upright soup can (seed 3, episode 0)
+CONTAINER_SETBACK = 0.0  # world y as with 0.04 before HOUSING_GAP; 0.08 put the drop poses out of reach for an upright can
 CONTAINER_POS = (0.0, ROOF_FRONT_Y - 0.2075 - 0.01 - CONTAINER_SETBACK, COUNTER_Z)  # world
 CONTAINER_BOXES = {  # its own box colliders (from the USD), container frame
     "floor": ((-0.3, -0.2, 0.0005), (0.3, 0.2, 0.0085)),
