@@ -47,6 +47,24 @@ Made after the seed-2 run and committed with this handoff (1e4893f):
 5. Then: scripted data collection for A2World (recording cameras, TCP pose, joints, gripper per step as in stage 1's
    `collect.py`), camera choice for the world model, episode variety.
 
+## This machine (RTX 4080 SUPER, set up 2026-11-05)
+Set up and smoke-tested; the seed-3 validation (next steps, 1.) has not been run yet.
+* **Env: `/home/data/siddiquieu1/envs/env_a2world`** (`conda activate /home/data/siddiquieu1/envs/env_a2world`), a clone
+  of `env_isaaclab` with the pinned cuRobo. Don't install this project's cuRobo into `env_isaaclab`: steve_il uses that
+  env with the new cuRobo v0.8 (`~/curobo`, different API, same package name). Isaac Lab is shared (editable `~/IsaacLab`).
+* `/home/user` (shared, ~92 % full) holds only the code; everything big is under `/home/data/siddiquieu1/` (other disk,
+  1.1 TB free), so the hard-coded paths work as they are.
+* cuRobo `ebb7170` + warp patch in `/home/data/siddiquieu1/src/curobo`, built with `TORCH_CUDA_ARCH_LIST=8.9` against a
+  CUDA 12.8 toolkit in its own env `/home/data/siddiquieu1/envs/cuda128` (conda-forge `cuda-nvcc`, `cuda-cudart-dev`,
+  `cuda-libraries-dev`; the system only has CUDA 13.3, a major version off torch's cu128):
+  `CUDA_HOME=$C PATH=$C/bin:$PATH CPATH=$C/targets/x86_64-linux/include LIBRARY_PATH=$C/targets/x86_64-linux/lib`.
+* conda here refuses the `defaults` channels (Anaconda ToS not accepted); every conda package we use is from conda-forge,
+  so pass `--override-channels -c conda-forge`.
+* Smoke tests (logs in `/home/data/siddiquieu1/setup_logs/`): `make_robot_cfg.py` OK; `test_planner.py` ALL OK
+  (grasp plans median 1.8 s); `gripper_test.py` with `GRIP_FORCE=30` holds the cube at 0.6 mm penetration (the script's
+  default is 40 N, which pushes through, as documented); `test_shelf_container.py` (no `--headless`, it has no Isaac app)
+  19/32, cracker box 2/8, the same numbers as the old machine; `pick_place.py --episodes 2` 2/2.
+
 ## Setting up on a new machine
 1. Clone with the submodule: `git clone --recurse-submodules git@github.com:220usamaahmed/A2WorldFineTuned.git`.
 2. Isaac Sim / Isaac Lab env `env_isaaclab`: `README.md`, "Setup from scratch", section B.

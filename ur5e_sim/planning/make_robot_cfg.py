@@ -1,6 +1,6 @@
 """Generate the cuRobo robot config for our UR5e + Robotiq 2F-85 (planning/ur5e_2f85.yml) and check it against the sim.
 
-    python make_robot_cfg.py            # (env_isaaclab, no Isaac app needed)
+    python make_robot_cfg.py            # (Isaac Lab env with the pinned cuRobo, no Isaac app needed)
 
 * Kinematics: our own URDF (assets/ur5e_gripper.urdf, the one the Isaac asset is converted from), base link
   ``ur5e_base_link`` (= the articulation root, i.e. the "arm-base frame" used everywhere in ur5e_sim), end-effector

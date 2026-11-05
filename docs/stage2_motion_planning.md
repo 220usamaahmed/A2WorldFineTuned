@@ -160,7 +160,7 @@ Not graspable by the 2F-85 in any resting pose (grasp sampler + floor filter): t
 large marker, scissors (too flat). Lying flat, the pudding box and potted meat can are not graspable either (their
 horizontal sides are wider than the 85 mm opening); scene sampling now only uses resting poses with >= 20 valid grasps.
 
-## Setup (in the Isaac Lab env `env_isaaclab`)
+## Setup (in the Isaac Lab env `env_isaaclab`; on the RTX 4080 machine a clone of it, see HANDOFF.md)
 cuRobo at the commit Isaac Lab 2.3 tests against, built against the env's torch 2.7 / cu128 with the CUDA 12.9 toolkit
 (`/usr/local/cuda-12.8` here has no nvcc; torch only refuses a different CUDA *major* version):
 ```bash
