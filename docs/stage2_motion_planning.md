@@ -62,6 +62,36 @@ back 10 cm along the approach, overlaps the object's surface points. Score: anti
 the object's centre, width margin. Per scene, grasps are moved to the object's simulated pose, filtered so the open gripper
 stays above the table, and a score-weighted random subset is passed to `plan_grasp` in that order.
 
+## Pick-and-place episodes (shelf + drawers -> container)
+`ur5e_sim/scene/pick_place.py --episodes N --seed S`. Layout (`scene/layout.py`): drawers on the -y side as before; a
+two-level wooden shelf on the +y side (0.9 m wide, 0.30 m deep, boards 15 cm and 47 cm above the table, open top, front at
+y = 0.32); Isaac's shallow grey tray (`Props/PackingTable/props/container_h20`, 0.61 x 0.41 x 0.09 m) on the table at the
++x end, between a pulled-out crate (reaches y = -0.17) and the shelf. Only the near half of the tray is within reach.
+Objects per run: 3 short ones in the crates (from soup can, pudding box, gelatin box, potted meat can, foam brick, banana;
+any resting pose in which the 2F-85 can grasp them) and the 4 tall ones on the shelf (mustard 19 cm, sugar box 18 cm,
+cracker box 21 cm, bleach 25 cm; upright). The master chef can and the wood block are wider than the 85 mm opening.
+
+Each episode: reset (crates closed, all objects in new random poses), source alternating drawer / shelf, a random object
+there; drawer: hook and pull the crate (the longest pull whose unhook ends collision-free); grasp: sampled grasps
+(crates: within 40 deg of vertical) in score-weighted random order, accepted only if the object can also be got out
+(`planning/tasks.plan_extraction`: lift 3 cm, attach, up out of the crate or straight out of the shelf); place: drop poses
+in the tray in the orientation the object rested in (3 positions x 8 yaws), raised so the gripper clears the tray walls
+(tall objects held from the side are released a few cm up), reached like a grasp with a vertical descent; release, back
+off, home. If an object has no feasible plan, the next object of the same source is tried. Grip force per object:
+250 N/kg x mass, 3-60 N (PhysX pushes the pads into light objects above ~300 N/kg).
+
+Shelf reachability with the planner alone (`planning/test_shelf_container.py`, each tall object upright at 4 spots per
+level, random yaw): grasp + extraction + placement planned for 19/32 (lower level 8/16, upper 11/16; cracker box 2/8,
+the others 5-6/8). With the lower board at table height it was 3/16 for that level.
+
+Episode runs (6-8 episodes each, alternating drawer / shelf): seed 0, first version: 1/4 (foam brick pushed through at
+20 N, bleach slipped, side-on crate grasps unplannable, mustard grasped by its cap); seed 0 after per-object grip force,
+crate grasp filter and centre-of-mass rescoring: 4/6; seed 1 (after raising drop poses above the tray walls): 2 of the
+first 3 episodes, then a crash (fixed: unhook end state in collision for bin 1, float64 reset tensor); **seed 2: 8/8**
+(4 drawer: soup can, pudding box x2, potted meat can; 4 shelf: mustard x2, sugar box x2; 1-31 mm from the target pose,
+<= 3 deg tilt; two shelf episodes needed a second / third object). Not yet validated: the final camera poses and the
+hard-exit excepthook (see HANDOFF.md).
+
 ## Results (2026-11-04)
 
 ### With the simplified gripper (current default)

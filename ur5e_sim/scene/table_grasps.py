@@ -39,6 +39,20 @@ args = ap.parse_args()
 args.enable_cameras = True
 app = AppLauncher(args).app
 
+
+def _die(exc_type, exc, tb):
+    """An uncaught exception must not leave Isaac hanging in shutdown with its GPU memory (a crashed run sat on 12 GB)."""
+    import os
+    import traceback
+
+    traceback.print_exception(exc_type, exc, tb)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(1)
+
+
+sys.excepthook = _die
+
 import imageio.v2 as imageio  # noqa: E402
 import numpy as np  # noqa: E402
 import torch  # noqa: E402

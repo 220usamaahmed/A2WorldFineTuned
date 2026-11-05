@@ -39,6 +39,7 @@ Per-episode metrics, PSNR-vs-step plots, logs, videos and montages are in `resul
 
 ```
 README.md
+HANDOFF.md                       where stage 2 stands, setup on a new machine, next steps
 docs/
   UR5e_finetuning_plan.md        first, general plan (data, cameras, format, estimates)
   UR5e_finetune_2gpu_plan.md     the executed one-day / 2-GPU plan, pilot results (section 10) and outcome note

@@ -48,6 +48,20 @@ args = ap.parse_args()
 args.enable_cameras = True
 app = AppLauncher(args).app
 
+
+def _die(exc_type, exc, tb):
+    """An uncaught exception must not leave Isaac hanging in shutdown with its GPU memory (a crashed run sat on 12 GB)."""
+    import os
+    import traceback
+
+    traceback.print_exception(exc_type, exc, tb)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(1)
+
+
+sys.excepthook = _die
+
 import imageio.v2 as imageio  # noqa: E402
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
@@ -291,8 +305,9 @@ OBJ_MASS = [float(o.root_physx_view.get_masses()[0].sum()) for o in OBJS]
 def set_grip_force(mass):
     """Squeeze force per pad for an object of this mass, as a real 2F-85's force setting (20-235 N): PhysX lets the pads
     push into light objects above ~300 N per kg (a 28 g foam brick at 20 N, a 0.1 kg cube at 40 N), so 250 N/kg, within
-    3-60 N (the 1.13 kg bleach bottle slipped out at 30 N)."""
-    f = float(np.clip(250.0 * mass, 3.0, 60.0))
+    3-30 N. Not more than 30 N: at 60 N a 0.35 kg soup can was not lifted either (the 1.13 kg bleach bottle can slip at
+    30 N)."""
+    f = float(np.clip(250.0 * mass, 3.0, 30.0))
     lim = torch.tensor([[f, f]], device=dev)
     robot.write_joint_effort_limit_to_sim(lim, joint_ids=PAD_IDS)
     robot.write_joint_stiffness_to_sim(lim / 0.005, joint_ids=PAD_IDS)  # full force 5 mm short of the target (= coupling)
