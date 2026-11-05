@@ -3,7 +3,8 @@
     OMNI_KIT_ACCEPT_EULA=YES CUDA_VISIBLE_DEVICES=0 python pick_place.py --headless [--episodes 6] [--seed 0]
 
 Scene (layout.py): table with the arm at its centre; three drawer housings with sliding crates on the -y side; a
-two-level wooden shelf on the +y side; Isaac's shallow grey tray (container_h20) on the table at the +x end. Short YCB
+two-level wooden shelf on the +y side; Isaac's shallow grey tray (container_h20) on top of the drawer housings, which
+form a shop counter (the customer would stand beyond them; layout.CONTAINER_POS). Short YCB
 objects stand in the crates (one per crate), taller ones on the shelf (two per level, upright). Gripper: the simplified
 physics (ur5e_env.use_simple_gripper).
 
@@ -128,14 +129,14 @@ def footprint(k, T):
 def random_layout():
     """World poses (pose7) for all 7 objects: crates (closed) and shelf."""
     out = []
-    for i in range(3):  # one per crate, inside the roof window of a crate pulled out ~0.12-0.15 m
+    for i in range(3):  # one per crate, under the roof opening once the crate is pulled out ~0.12-0.15 m (layout.CRATE_OBJ_XC)
         k = KEYS[i]
         Ts, ps, _ = zip(*INFO[k]["poses"])
         T = np.array(Ts[rng.choice(len(Ts), p=np.array(ps) / sum(ps))])
         Rz = np.eye(4)
         Rz[:3, :3] = R.from_euler("z", rng.uniform(0, 2 * np.pi)).as_matrix()
         T = Rz @ T
-        T[:3, 3] += L.crate_to_world(i, rng.uniform(0.06, 0.14), rng.uniform(-0.08, 0.08), L.FLOOR_TOP + 0.003)
+        T[:3, 3] += L.crate_to_world(i, rng.uniform(*L.CRATE_OBJ_XC), rng.uniform(*L.CRATE_OBJ_YC), L.FLOOR_TOP + 0.003)
         out.append(pose7(T))
     for lvl in (0, 1):  # two per level, upright, on non-adjacent spots
         spots = [L.SHELF_SPOTS_X[j] for j in [(0, 2), (1, 3), (0, 3)][rng.integers(3)]]

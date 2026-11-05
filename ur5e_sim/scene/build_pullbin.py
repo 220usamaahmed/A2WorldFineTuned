@@ -21,12 +21,15 @@ sys.stdout.reconfigure(line_buffering=True)
 from isaaclab.app import AppLauncher
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import layout  # noqa: E402  (plain numbers, no Isaac imports)
+
 ap = argparse.ArgumentParser()
 ap.add_argument("--out", type=Path, default=HERE.parent / "assets" / "usd" / "pullbin.usd")
 ap.add_argument("--assets", type=Path, default=Path("/home/data/siddiquieu1/assets/Isaac/5.1/Isaac"))
 ap.add_argument("--base-z", type=float, default=0.75, help="height of the housing's base plate (top face) above the floor [m]; 0.75 = table top")
 ap.add_argument("--wall-h", type=float, default=0.25, help="side wall height above the base plate = clearance under the roof [m]; the crate itself is 0.17")
-ap.add_argument("--window", type=float, default=0.20, help="depth of the roof opening at the front, over the crate [m]")
+ap.add_argument("--window", type=float, default=layout.WINDOW, help="depth of the roof opening at the front, over the crate [m] (default: layout.WINDOW, which the planner uses)")
 AppLauncher.add_app_launcher_args(ap)
 args = ap.parse_args()
 app = AppLauncher(args).app

@@ -19,9 +19,13 @@ TABLE_EDGE_Y = -0.30  # the housings stand against this edge
 
 # ---- build_pullbin.py ----
 Z_B = TABLE_Z  # housing base plate top
-T, IN_HALF_W, BACK_X, FRONT_X, WALL_H, WINDOW = 0.02, 0.215, -0.315, 0.32, 0.25, 0.20
+T, IN_HALF_W, BACK_X, FRONT_X, WALL_H = 0.02, 0.215, -0.315, 0.32, 0.25
+# roof opening at the housing front, over the pulled-out crate (build_pullbin.py's default). 0.20 before the counter
+# layout; below ~0.12 the gripper body (15 cm across its fingers) no longer fits past the roof edge to hook the rim bar
+WINDOW = 0.12
 W = IN_HALF_W + T
 ROOF_X = (BACK_X - T, FRONT_X - WINDOW)
+COUNTER_Z = Z_B + WALL_H + T  # top face of the roofs: the shop counter the container stands on (world z)
 CL, CW, CH = 0.6052, 0.4052, 0.1703
 WALL_IN_X, SIDE_IN_Y, FLOOR_T, BAR_Z0, BAR_OUT_X, CRATE_Z0 = 0.290, 0.1965, 0.006, 0.144, 0.3026, 0.002
 SLIDE_MAX = 0.35
@@ -33,6 +37,11 @@ ORIGIN_Y = TABLE_EDGE_Y - FRONT_X
 FLOOR_TOP = Z_B + CRATE_Z0 + FLOOR_T  # inside floor of a crate (world z)
 WALL_Y = ORIGIN_Y + 0.5 * (WALL_IN_X + BAR_OUT_X)  # middle of the crate's front end wall incl. rim bar (world y), closed
 BAR_Z = Z_B + CRATE_Z0 + 0.5 * (BAR_Z0 + CH)  # middle of the rim bar (world z)
+ROOF_FRONT_Y = ORIGIN_Y + ROOF_X[1]  # world y of the roofs' front edge (the counter's edge on the arm's side)
+# object centres in a closed crate (crate x along the pull axis): far enough forward that, with the crate pulled out
+# ~0.15 m, the object is under the roof opening and the gripper clears the roof edge
+CRATE_OBJ_XC = (0.10, 0.18)
+CRATE_OBJ_YC = (-0.08, 0.08)
 
 HOUSING_BOXES = {  # name: (lo, hi) in the housing frame
     "plinth": ((BACK_X - T, -W, 0.0), (FRONT_X, W, Z_B - T)),
@@ -111,11 +120,12 @@ SHELF_BOXES = {  # name: (lo, hi) in the world frame
 SHELF_SPOTS_X = (-0.32, -0.11, 0.11, 0.32)  # nominal object x positions on a level (jittered per episode)
 SHELF_SPOTS_Y = (SHELF_FRONT_Y + 0.05, SHELF_FRONT_Y + 0.14)  # object centre y range on a level
 
-# ---- container: Isaac's shallow grey tray (Props/PackingTable/props/container_h20), on the table at the +x end ----
-# 0.612 x 0.412 x 0.09 m, origin at the bottom centre, long side along x, its +x edge flush with the table's +x end.
-# Across the table it has to fit between a pulled-out crate (reaches y = -0.17) and the shelf (y >= 0.32).
+# ---- container: Isaac's shallow grey tray (Props/PackingTable/props/container_h20), on the counter ----
+# 0.612 x 0.412 x 0.09 m, origin at the bottom centre, long side along x. It stands on the drawer housings' roofs like
+# on a shop counter (the customer is beyond the drawers, at -y), centred on the middle housing, its arm-side wall 1 cm
+# behind the roof opening.
 CONTAINER_USD = "Props/PackingTable/props/container_h20/container_h20.usd"
-CONTAINER_POS = (TABLE_SIZE[0] / 2 - 0.306, 0.105, TABLE_Z)  # world
+CONTAINER_POS = (0.0, ROOF_FRONT_Y - 0.2075 - 0.01, COUNTER_Z)  # world
 CONTAINER_BOXES = {  # its own box colliders (from the USD), container frame
     "floor": ((-0.3, -0.2, 0.0005), (0.3, 0.2, 0.0085)),
     "wall_yp": ((-0.3, 0.1925, 0.01), (0.3, 0.2075, 0.09)),
@@ -123,9 +133,10 @@ CONTAINER_BOXES = {  # its own box colliders (from the USD), container frame
     "wall_xm": ((-0.3075, -0.19, 0.01), (-0.2925, 0.19, 0.09)),
     "wall_xp": ((0.2925, -0.19, 0.01), (0.3075, 0.19, 0.09)),
 }
-CONTAINER_FLOOR_TOP = TABLE_Z + 0.0085  # world z
+CONTAINER_FLOOR_TOP = CONTAINER_POS[2] + 0.0085  # world z
 CONTAINER_INNER = ((CONTAINER_POS[0] - 0.2925, CONTAINER_POS[0] + 0.2925), (CONTAINER_POS[1] - 0.1925, CONTAINER_POS[1] + 0.1925))
-CONTAINER_DROP_X = (CONTAINER_INNER[0][0], CONTAINER_POS[0] + 0.05)  # the far half of the tray is out of the arm's reach
+# where drop poses are sampled ((x0, x1), (y0, y1), world): the half of the tray towards the arm, the far half is out of reach
+CONTAINER_DROP = (CONTAINER_INNER[0], (CONTAINER_POS[1] - 0.05, CONTAINER_INNER[1][1]))
 
 
 def shelf_boxes(frame: str = "base"):

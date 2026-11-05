@@ -70,6 +70,16 @@ shelf's side wall hides the shelf contents and most of a shelf pick. Both leave 
   default is 40 N, which pushes through, as documented); `test_shelf_container.py` (no `--headless`, it has no Isaac app)
   19/32, cracker box 2/8, the same numbers as the old machine; `pick_place.py --episodes 2` 2/2.
 
+## Counter layout (branch `counter-layout`, 2026-11-05)
+The tray stands on the drawer housings' roofs like on a shop counter (customer beyond the drawers, -y), centred on the
+middle housing; the roof opening over the crates is 12 cm instead of 20 (`layout.WINDOW`; below ~12 cm the gripper body
+no longer clears the roof edge when hooking the rim bar), and crate objects start further forward
+(`layout.CRATE_OBJ_XC`) so they are under the opening after the pull. **`pullbin.usd` is generated, not in git: rerun
+`build_pullbin.py` after switching between this branch and main** (its window defaults to `layout.WINDOW`).
+Results: seed 2 8/8, seed 3 7/8 (same as main: 8/8, 7/8); placements tighter (<= 14 mm, <= 3 deg). The one failure is a
+bin-2 potted meat can with no feasible grasp approach (open problem 4, now with a narrower opening). Planner-only
+`test_shelf_container.py`: 16/32 (main 19/32). Stills: `/home/data/siddiquieu1/scene_previews/stills_counter/`.
+
 ## Setting up on a new machine
 1. Clone with the submodule: `git clone --recurse-submodules git@github.com:220usamaahmed/A2WorldFineTuned.git`.
 2. Isaac Sim / Isaac Lab env `env_isaaclab`: `README.md`, "Setup from scratch", section B.

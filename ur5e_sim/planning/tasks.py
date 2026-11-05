@@ -65,8 +65,10 @@ def drop_poses(T_tcp_obj, T_obj_rest, support_z, rng, n_xy: int = 3, yaws=(0, 90
     frame), turned about the vertical by each yaw, at n_xy random positions inside the reachable part of the container
     (``footprint``: margin from the walls). The orientation it rested in is stable on a flat floor."""
     out = []
-    lo_x, hi_x = L.CONTAINER_DROP_X[0] + footprint, L.CONTAINER_DROP_X[1]
-    lo_y, hi_y = L.CONTAINER_INNER[1][0] + footprint, L.CONTAINER_INNER[1][1] - footprint
+    (x0, x1), (y0, y1) = L.CONTAINER_DROP
+    (ix0, ix1), (iy0, iy1) = L.CONTAINER_INNER
+    lo_x, hi_x = max(x0, ix0 + footprint), min(x1, ix1 - footprint)  # footprint: margin from the walls only
+    lo_y, hi_y = max(y0, iy0 + footprint), min(y1, iy1 - footprint)
     T_held_inv = np.linalg.inv(T_tcp_obj)
     for _ in range(n_xy):
         xy = (rng.uniform(lo_x, hi_x), rng.uniform(lo_y, hi_y))
