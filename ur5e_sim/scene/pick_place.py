@@ -47,6 +47,7 @@ ap.add_argument("--tag", default="")
 ap.add_argument("--stills", action="store_true",
                 help="only render high-resolution stills of the scene (crates closed, then pulled out) to --out, then exit")
 ap.add_argument("--stills-size", default="1920x1080", help="WxH of the stills")
+ap.add_argument("--stills-open", default="0,1,2", help="crates (0 = -x .. 2 = +x) pulled out for the 'open' stills")
 AppLauncher.add_app_launcher_args(ap)
 args = ap.parse_args()
 args.enable_cameras = True
@@ -175,10 +176,10 @@ def obj_cfg(i):
     )
 
 
-def board_cfg(name, lo, hi):
+def board_cfg(name, lo, hi, prefix="shelf"):
     lo, hi = np.asarray(lo, float), np.asarray(hi, float)
     return AssetBaseCfg(
-        prim_path=f"{{ENV_REGEX_NS}}/shelf_{name}",
+        prim_path=f"{{ENV_REGEX_NS}}/{prefix}_{name}",
         spawn=sim_utils.CuboidCfg(size=tuple(map(float, hi - lo)), collision_props=sim_utils.CollisionPropertiesCfg(),
                                   visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=WOOD, roughness=0.8),
                                   physics_material=sim_utils.RigidBodyMaterialCfg(static_friction=1.0, dynamic_friction=1.0)),
@@ -215,6 +216,8 @@ class SceneCfg(E.SceneCfg):
     shelf_side_l = board_cfg("side_l", *_SB["side_l"])
     shelf_side_r = board_cfg("side_r", *_SB["side_r"])
     shelf_back = board_cfg("back", *_SB["back"])
+    counter_end_l = board_cfg("end_l", *L.COUNTER_END_BOXES["end_l"], prefix="counter")
+    counter_end_r = board_cfg("end_r", *L.COUNTER_END_BOXES["end_r"], prefix="counter")
     container = AssetBaseCfg(prim_path="{ENV_REGEX_NS}/container", spawn=sim_utils.UsdFileCfg(usd_path=str(ISAAC / L.CONTAINER_USD)),
                              init_state=AssetBaseCfg.InitialStateCfg(pos=L.CONTAINER_POS))
     obj0: RigidObjectCfg = obj_cfg(0)
@@ -234,7 +237,7 @@ class EnvCfg(E.Ur5eTableJointEnvCfg):
 
 
 objects0 = [(f"obj{i}", MESHES / f"{KEYS[i]}.obj", np.r_[layout0[i][:3] - to_base, layout0[i][3:]]) for i in range(7)]
-planner = ArmPlanner(L.world_config(objects=objects0, shelf=True, container=True), time_dilation=args.speed)
+planner = ArmPlanner(L.world_config(objects=objects0, shelf=True, container=True, counter_ends=True), time_dilation=args.speed)
 HOME = planner.home
 
 # --stills: extra high-resolution cameras, name -> (eye, look-at, focal length [mm]), world frame
@@ -538,7 +541,7 @@ if args.stills:
     hold(20)  # a few more rendered frames, so the renderer has converged
     save_stills("closed")
     PULL = 0.15
-    for i in range(3):  # pull the crates out (housing +x = world +y) and move their objects with them
+    for i in map(int, args.stills_open.split(",")):  # pull the crates out (housing +x = world +y) and move their objects with them
         BINS[i].write_joint_state_to_sim(torch.tensor([[PULL]], device=dev), torch.zeros(1, 1, device=dev))
         p = OBJS[i].data.root_pose_w.clone()
         p[0, 1] += PULL
