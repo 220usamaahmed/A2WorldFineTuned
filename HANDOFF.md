@@ -24,8 +24,8 @@ Last full result (`pick_place.py --episodes 8 --seed 2`, commit cb553f6 plus the
 pudding box x2, potted meat can) and 4 shelf episodes (mustard x2, sugar box x2), placed 1-31 mm from the target pose,
 <= 3 deg tilt. Two shelf episodes needed a second/third object because the first had no feasible plan or slipped.
 
-## Uncommitted-at-the-time changes in the last commit (untested in a full run)
-Made after the seed-2 run and committed with this handoff, **not yet validated by an episode run**:
+## Changes not yet validated by an episode run
+Made after the seed-2 run and committed with this handoff (1e4893f):
 1. New overview camera poses in `pick_place.py` (`EYE_A/LOOK_A`, `EYE_B/LOOK_B`): one from beyond the drawers looking at
    the shelf front, one from the +x end. Checked on single frames only. (The earlier ones looked through the shelf walls.)
 2. `sys.excepthook` that hard-exits (`os._exit`) in `pick_place.py`, `sidebins_curobo.py`, `table_grasps.py`: a crashed
