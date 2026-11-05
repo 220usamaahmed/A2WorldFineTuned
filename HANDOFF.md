@@ -70,16 +70,17 @@ shelf's side wall hides the shelf contents and most of a shelf pick. Both leave 
   default is 40 N, which pushes through, as documented); `test_shelf_container.py` (no `--headless`, it has no Isaac app)
   19/32, cracker box 2/8, the same numbers as the old machine; `pick_place.py --episodes 2` 2/2.
 
-## Counter layout (branch `counter-layout`, 2026-11-05)
+## Counter layout (on main since 2026-11-05)
 The tray stands on the drawer housings' roofs like on a shop counter (customer beyond the drawers, -y), centred on the
 middle housing; the roof opening over the crates is 12 cm instead of 20 (`layout.WINDOW`; below ~12 cm the gripper body
 no longer clears the roof edge when hooking the rim bar), and crate objects start further forward
-(`layout.CRATE_OBJ_XC`) so they are under the opening after the pull. **`pullbin.usd` is generated, not in git: rerun
-`build_pullbin.py` after switching between this branch and main** (its window defaults to `layout.WINDOW`).
-Results: seed 2 8/8, seed 3 7/8 (same as main: 8/8, 7/8); placements tighter (<= 14 mm, <= 3 deg). The one failure is a
+(`layout.CRATE_OBJ_XC`) so they are under the opening after the pull. **`pullbin.usd` is generated, not in git:
+one built before this layout has the 20 cm opening, so rerun `build_pullbin.py` there** (its window defaults to
+`layout.WINDOW`; a fresh checkout builds it in the setup steps below).
+First results: seed 2 8/8, seed 3 7/8 (same as the old table layout: 8/8, 7/8); placements tighter (<= 14 mm, <= 3 deg). The one failure is a
 bin-2 potted meat can with no feasible grasp approach (open problem 4, now with a narrower opening). Planner-only
-`test_shelf_container.py`: 16/32 (main 19/32). Stills: `/home/data/siddiquieu1/scene_previews/stills_counter/`.
-Later on this branch: shelf and counter (solid filler ends) span the table's width, filler strips close the gaps to
+`test_shelf_container.py`: 16/32 (old layout 19/32). Stills: `/home/data/siddiquieu1/scene_previews/stills_counter/`.
+Then: shelf and counter (solid filler ends) span the table's width, filler strips close the gaps to
 the shelf and to the housings (`layout.FILLER_BOXES`, cosmetic but in the planner world); the housings stand 4 cm beyond
 the table edge (`layout.HOUSING_GAP`) so the middle crate, right in front of the arm base, can be pulled the full 0.15 m
 (before: only 0.12 m, and its object was then often ungraspable under the 12 cm opening); the tray stays where it was
