@@ -15,6 +15,10 @@ import numpy as np
 
 TABLE_Z = 0.75
 TABLE_SIZE = (1.8, 0.6)  # x, y; centred on the arm base
+# bar code scanner on the table top, +x of the arm: a metal frame around a dark glass window. Cosmetic only for now
+# (visual, no collision, not in the planner's world); clear of the pulled-out crates (y < -0.19) and of the arm base
+SCANNER_XY, SCANNER_SIZE = (0.45, -0.02), (0.30, 0.20)  # centre (world x, y), outer size
+SCANNER_H, SCANNER_RIM = 0.010, 0.025  # height above the table top, frame width; the glass sits 1 mm below the frame
 TABLE_EDGE_Y = -0.30  # the table's edge on the drawer side
 # the housings stand HOUSING_GAP beyond the table edge (a filler strip closes the gap): pulled out 0.15 m, the middle
 # crate (in front of the arm base) otherwise comes so close to the base that only 0.12 m could be planned
