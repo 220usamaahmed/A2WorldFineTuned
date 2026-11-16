@@ -1,0 +1,5 @@
+# Isaac assets the scene needs (paths relative to the Isaac asset root); fetch with fetch_assets.py --list assets.txt
+Props/YCB/Axis_Aligned/
+Props/YCB/Axis_Aligned_Physics/
+Props/PackingTable/props/SM_Crate_A08_Blue_01/SM_Crate_A08_Blue_01.usd
+Props/PackingTable/props/container_h20/container_h20.usd

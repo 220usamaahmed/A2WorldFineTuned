@@ -29,6 +29,9 @@ sys.stdout.reconfigure(line_buffering=True)
 from isaaclab.app import AppLauncher
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
+import paths  # noqa: E402
+
 ap = argparse.ArgumentParser()
 ap.add_argument("--episodes", type=int, default=6)
 ap.add_argument("--seed", type=int, default=0)
@@ -42,12 +45,15 @@ ap.add_argument("--slide-damping", type=float, default=15.0)
 ap.add_argument("--candidates", type=int, default=40, help="sampled grasps handed to the planner per pick")
 ap.add_argument("--drawer-objects", default="", help="3 YCB keys, one per crate (default: random from the short set)")
 ap.add_argument("--shelf-objects", default="", help="4 YCB keys, 2 per level (default: random from the tall set)")
-ap.add_argument("--out", type=Path, default=Path("/home/data/siddiquieu1/scene_previews/pick_place"))
+ap.add_argument("--out", type=Path, default=paths.EPISODES)
 ap.add_argument("--tag", default="")
 ap.add_argument("--stills", action="store_true",
                 help="only render high-resolution stills of the scene (crates closed, then pulled out) to --out, then exit")
 ap.add_argument("--stills-size", default="1920x1080", help="WxH of the stills")
 ap.add_argument("--stills-open", default="0,1,2", help="crates (0 = -x .. 2 = +x) pulled out for the 'open' stills")
+ap.add_argument("--no-video", action="store_true",
+                help="no episode cameras or videos (saves GPU memory, e.g. when watching via --livestream 2)")
+ap.add_argument("--stills-cams", default="", help="comma-separated subset of the STILLS cameras (default: all; each costs GPU memory)")
 AppLauncher.add_app_launcher_args(ap)
 args = ap.parse_args()
 args.enable_cameras = True
@@ -81,20 +87,18 @@ from isaaclab.utils import configclass  # noqa: E402
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE.parent / "planning"))
 import layout as L  # noqa: E402
+import looks as LK  # noqa: E402
 import robot_defs as n  # noqa: E402
 import ur5e_env as E  # noqa: E402
 from grasps import cached_grasps, collider_mesh, graspable_stable_poses, world_filter  # noqa: E402
 from planner import ArmPlanner, Plan, pregrasp  # noqa: E402
 from tasks import T_of, clear_container_walls, drop_poses, plan_extraction, pose7  # noqa: E402
 
-ASSETS = Path("/home/data/siddiquieu1/assets")
-ISAAC = ASSETS / "Isaac/5.1/Isaac"
-PHYS, MESHES = ASSETS / "ycb_physics", ASSETS / "ycb_meshes"
-BIN_USD = HERE.parent / "assets" / "usd" / "pullbin.usd"
+ISAAC, PHYS, MESHES = paths.ISAAC, paths.YCB_PHYSICS, paths.YCB_MESHES
+BIN_USD = paths.USD / "pullbin.usd"
 SHORT = ["005_tomato_soup_can", "008_pudding_box", "009_gelatin_box", "010_potted_meat_can", "061_foam_brick", "011_banana"]
 TALL = ["006_mustard_bottle", "004_sugar_box", "003_cracker_box", "021_bleach_cleanser"]
 Q_HOOK = np.array([*R.from_matrix(np.stack([[0, 1, 0], [1, 0, 0], [0, 0, -1]], 1)).as_quat()[[3, 0, 1, 2]]])  # fingers along y
-WOOD = (0.45, 0.30, 0.18)
 to_base = np.array([0.0, 0.0, L.TABLE_Z])
 rng = np.random.default_rng(args.seed)
 
@@ -180,8 +184,7 @@ def board_cfg(name, lo, hi, prefix="shelf"):
     lo, hi = np.asarray(lo, float), np.asarray(hi, float)
     return AssetBaseCfg(
         prim_path=f"{{ENV_REGEX_NS}}/{prefix}_{name}",
-        spawn=sim_utils.CuboidCfg(size=tuple(map(float, hi - lo)), collision_props=sim_utils.CollisionPropertiesCfg(),
-                                  visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=WOOD, roughness=0.8),
+        spawn=sim_utils.CuboidCfg(size=tuple(map(float, hi - lo)), collision_props=sim_utils.CollisionPropertiesCfg(),  # look: looks.py
                                   physics_material=sim_utils.RigidBodyMaterialCfg(static_friction=1.0, dynamic_friction=1.0)),
         init_state=AssetBaseCfg.InitialStateCfg(pos=tuple(map(float, (lo + hi) / 2))),
     )
@@ -193,20 +196,26 @@ def board_cfg(name, lo, hi, prefix="shelf"):
 EYE_A, LOOK_A = (0.60, -1.30, 2.10), (0.05, 0.30, 0.95)
 EYE_B, LOOK_B = (1.65, 0.05, 1.95), (0.0, -0.15, 0.80)
 _SB = L.SHELF_BOXES
+_FB = L.FILLER_BOXES
+_SKY, _SUN = LK.light_cfgs()
+# the desk: the table plus the filler strips on both sides of it (same union as the table + layout's strips), drawn as a
+# painted body under one wooden top
+_DESK = ((-L.TABLE_SIZE[0] / 2, _FB["table_strip_front"][0][1], 0.0), (L.TABLE_SIZE[0] / 2, _FB["table_strip"][1][1], L.TABLE_Z))
+
+
+def _split_top(lo, hi, t=L.T):
+    """(body lo, hi), (top lo, hi): a box cut t below its top, so the top can take the wood (looks.py)."""
+    lo, hi = np.asarray(lo, float), np.asarray(hi, float)
+    return (lo, np.r_[hi[:2], hi[2] - t]), (np.r_[lo[:2], hi[2] - t], hi)
 
 
 @configclass
 class SceneCfg(E.SceneCfg):
-    cube = None
-    cam_ext1 = None
-    cam_ext2 = None
-    table = AssetBaseCfg(
-        prim_path="{ENV_REGEX_NS}/table",
-        spawn=sim_utils.CuboidCfg(size=(L.TABLE_SIZE[0], L.TABLE_SIZE[1], L.TABLE_Z), collision_props=sim_utils.CollisionPropertiesCfg(),
-                                  visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=WOOD, roughness=0.8),
-                                  physics_material=sim_utils.RigidBodyMaterialCfg(static_friction=1.0, dynamic_friction=1.0)),
-        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.0, 0.0, L.TABLE_Z / 2)),
-    )
+    ground = AssetBaseCfg(prim_path="/World/ground", spawn=sim_utils.GroundPlaneCfg(visible=False))  # backdrop floor: looks.py
+    sky = _SKY
+    sun = _SUN
+    table = board_cfg("body", *_split_top(*_DESK)[0], prefix="desk")
+    table_top = board_cfg("top", *_split_top(*_DESK)[1], prefix="desk")
     bin0: ArticulationCfg = bin_cfg(0)
     bin1: ArticulationCfg = bin_cfg(1)
     bin2: ArticulationCfg = bin_cfg(2)
@@ -216,10 +225,10 @@ class SceneCfg(E.SceneCfg):
     shelf_side_l = board_cfg("side_l", *_SB["side_l"])
     shelf_side_r = board_cfg("side_r", *_SB["side_r"])
     shelf_back = board_cfg("back", *_SB["back"])
-    counter_end_l = board_cfg("end_l", *L.FILLER_BOXES["end_l"], prefix="filler")
-    counter_end_r = board_cfg("end_r", *L.FILLER_BOXES["end_r"], prefix="filler")
-    filler_table_strip = board_cfg("table_strip", *L.FILLER_BOXES["table_strip"], prefix="filler")
-    filler_table_strip_front = board_cfg("table_strip_front", *L.FILLER_BOXES["table_strip_front"], prefix="filler")
+    counter_end_l = board_cfg("end_l", *_split_top(*_FB["end_l"])[0], prefix="filler")
+    counter_end_r = board_cfg("end_r", *_split_top(*_FB["end_r"])[0], prefix="filler")
+    counter_top_l = board_cfg("top_l", *_split_top(*_FB["end_l"])[1], prefix="filler")
+    counter_top_r = board_cfg("top_r", *_split_top(*_FB["end_r"])[1], prefix="filler")
     container = AssetBaseCfg(prim_path="{ENV_REGEX_NS}/container", spawn=sim_utils.UsdFileCfg(usd_path=str(ISAAC / L.CONTAINER_USD)),
                              init_state=AssetBaseCfg.InitialStateCfg(pos=L.CONTAINER_POS))
     obj0: RigidObjectCfg = obj_cfg(0)
@@ -234,7 +243,7 @@ class SceneCfg(E.SceneCfg):
 
 
 @configclass
-class EnvCfg(E.Ur5eTableJointEnvCfg):
+class EnvCfg(E.Ur5eEnvCfg):
     scene: SceneCfg = SceneCfg(num_envs=1, env_spacing=8.0)
 
 
@@ -253,7 +262,12 @@ STILLS = {
     "drawers": ((0.6, 0.15, 1.95), (-0.05, -0.62, 0.8), 16.0),
 }
 cfg = EnvCfg()
+if args.no_video:
+    cfg.scene.cam_a = cfg.scene.cam_b = cfg.scene.cam_wrist = None
 if args.stills:
+    if args.stills_cams:
+        STILLS = {k: STILLS[k] for k in args.stills_cams.split(",")}
+    cfg.scene.cam_a = cfg.scene.cam_b = None  # the episode cameras are not needed for stills
     sw, sh = map(int, args.stills_size.lower().split("x"))
     for nm, (eye, look, focal) in STILLS.items():
         c = E._camera(f"still_{nm}", eye, focal, rot=E.look_at_quat(eye, look))
@@ -262,6 +276,7 @@ if args.stills:
 E.use_simple_gripper(cfg, grip_force=args.grip_force)
 cfg.scene.robot.init_state.joint_pos.update(dict(zip(n.ARM_JOINTS, map(float, HOME))))
 env = ManagerBasedRLEnv(cfg)
+LK.apply(env.scene.stage)
 env.reset()
 dev = env.device
 robot = env.scene["robot"]
@@ -296,6 +311,8 @@ def q_meas():
 
 def step(q, grip):
     env.step(torch.tensor([[*q, grip]], dtype=torch.float32, device=dev))
+    if args.stills or args.no_video:
+        return
     frames.append(np.concatenate([env.scene[c].data.output["rgb"][0].cpu().numpy()[..., :3].astype(np.uint8)
                                   for c in ("cam_a", "cam_b", "cam_wrist")], 1))
 
@@ -591,7 +608,8 @@ for ep in range(args.episodes):
     rec["ok"] = any(a.get("ok") for a in rec["attempts"])
     rec["motions"] = list(motions)
     records.append(rec)
-    imageio.mimwrite(args.out / f"ep{ep:02d}{args.tag}.mp4", frames, fps=10, macro_block_size=1)
+    if frames:
+        imageio.mimwrite(args.out / f"ep{ep:02d}{args.tag}.mp4", frames, fps=10, macro_block_size=1)
     (args.out / f"episodes{args.tag}.json").write_text(json.dumps(records, indent=1, default=float))
 
 print("\nSUMMARY")

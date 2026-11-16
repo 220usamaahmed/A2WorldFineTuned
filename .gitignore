@@ -1,19 +1,10 @@
-# Generated or recorded data and assets (regenerate with the scripts in ur5e_sim/)
-ur5e_sim/data/
-# generated USD (regenerate with ur5e_sim/convert_arm.py)
+# large files (A2W_DATA default) and generated files
+data/
 ur5e_sim/assets/usd/
 ur5e_sim/logs/
-ur5e_sim/tmp/
-libero_data/
-
-# Results (metrics, plots, videos, logs): local only, the repository holds code
-results/
-
-# Checkpoints, arrays, scratch
+__pycache__/
+*.pyc
 *.pt
 *.pth
 *.npz
-tmp*/
-__pycache__/
-*.pyc
 .venv/

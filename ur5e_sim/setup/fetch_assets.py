@@ -1,6 +1,6 @@
 """Mirror USD assets from NVIDIA's public Isaac asset bucket to local disk, together with everything they reference.
 
-    python fetch_assets.py [--dest /home/data/siddiquieu1/assets] [--list assets.txt | PATH ...]
+    python fetch_assets.py [--dest $A2W_DATA/assets] [--list assets.txt | PATH ...]
 
 PATH is relative to the Isaac root (e.g. Props/YCB/Axis_Aligned/003_cracker_box.usd). A folder (trailing "/") fetches every
 usd file below it. The dependency walk (sublayers, references, payloads, textures, MDL files) uses pxr, so run this under
@@ -19,14 +19,16 @@ from pathlib import Path
 
 sys.stdout.reconfigure(line_buffering=True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from ls_isaac_assets import BUCKET, ROOT, list_keys  # noqa: E402
+import paths  # noqa: E402
 
 from isaaclab.app import AppLauncher  # noqa: E402
 
 ap = argparse.ArgumentParser()
 ap.add_argument("paths", nargs="*")
 ap.add_argument("--list", type=Path, help="text file with one path per line (# comments allowed)")
-ap.add_argument("--dest", type=Path, default=Path("/home/data/siddiquieu1/assets"))
+ap.add_argument("--dest", type=Path, default=paths.ASSETS)
 AppLauncher.add_app_launcher_args(ap)
 args = ap.parse_args()
 args.headless = True

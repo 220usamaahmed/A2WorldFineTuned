@@ -13,11 +13,13 @@ import sys
 from pathlib import Path
 
 sys.stdout.reconfigure(line_buffering=True)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # ur5e_sim/
+import paths  # noqa: E402
 from isaaclab.app import AppLauncher
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--ycb", type=Path, default=Path("/home/data/siddiquieu1/assets/Isaac/5.1/Isaac/Props/YCB"))
-ap.add_argument("--out", type=Path, default=Path("/home/data/siddiquieu1/assets/ycb_meshes"))
+ap.add_argument("--ycb", type=Path, default=paths.ISAAC / "Props/YCB")
+ap.add_argument("--out", type=Path, default=paths.YCB_MESHES)
 ap.add_argument("--inspect", action="store_true", help="print the prim tree of every file")
 AppLauncher.add_app_launcher_args(ap)
 args = ap.parse_args()

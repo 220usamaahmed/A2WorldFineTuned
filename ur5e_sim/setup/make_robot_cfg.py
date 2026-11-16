@@ -24,12 +24,14 @@ import yourdfpy
 HERE = Path(__file__).resolve().parent
 SIM = HERE.parent
 sys.path.insert(0, str(SIM))
+sys.path.insert(0, str(SIM / "planning"))
+import paths  # noqa: E402
 import robot_defs as n  # noqa: E402
 
 from curobo.util_file import get_robot_configs_path, join_path, load_yaml  # noqa: E402
 
-URDF = SIM / "assets" / "ur5e_gripper.urdf"
-OUT = HERE / "ur5e_2f85.yml"
+URDF = paths.ROBOT_URDF
+OUT = paths.ROBOT_YML
 P = "ur5e_"  # arm link prefix in our URDF
 ARM_LINKS = ["shoulder_link", "upper_arm_link", "forearm_link", "wrist_1_link", "wrist_2_link", "wrist_3_link"]
 GRIPPER_LINKS = [
@@ -124,8 +126,8 @@ def main():
 
     arm_joints = list(n.ARM_JOINTS)
     cfg = {"robot_cfg": {"kinematics": {
-        "urdf_path": str(URDF),
-        "asset_root_path": str(URDF.parent),
+        "urdf_path": "assets/ur5e_gripper.urdf",  # relative to ur5e_sim/; planning/planner.py makes these absolute
+        "asset_root_path": "assets",
         "usd_path": None,
         "base_link": P + "base_link",
         "ee_link": "grasp_frame",
@@ -167,7 +169,9 @@ def main():
     from curobo.types.base import TensorDeviceType
 
     tdt = TensorDeviceType()
-    model = CudaRobotModel(CudaRobotModelConfig.from_robot_yaml_file(load_yaml(str(OUT))["robot_cfg"], tensor_args=tdt))
+    from planner import load_robot_cfg
+
+    model = CudaRobotModel(CudaRobotModelConfig.from_robot_yaml_file(load_robot_cfg(), tensor_args=tdt))
     print("cuRobo joints:", model.joint_names)
     q = tdt.to_device(torch.tensor([list(n.ARM_READY)]))
     st = model.get_state(q)

@@ -1,13 +1,13 @@
 """Geometry of the side-bins scene as plain numbers (no Isaac imports): table, three drawer housings with sliding crates.
 
-Used by the Isaac scene (sidebins_curobo.py) and by the cuRobo collision world. Frames:
-  * world: z up, arm base on the table top at the origin (as in ur5e_env / sidebins_test.py)
+Used by the Isaac scene (pick_place.py) and by the cuRobo collision world. Frames:
+  * world: z up, arm base on the table top at the origin (as in ur5e_env)
   * base: the arm-base frame = world shifted down by TABLE_Z (what the planner and the arm actions use)
   * housing i: origin on the floor under the housing centre, local +x = pull direction; placed at (BIN_X[i], ORIGIN_Y, 0)
     and yawed +90 deg, so local +x -> world +y and local +y -> world -x
   * crate: origin at the centre of the crate bottom, offset by the slide along housing +x
 
-Numbers MUST match build_pullbin.py (the USD's colliders) and sidebins_test.py (the placement).
+Numbers MUST match setup/build_pullbin.py (the USD's colliders).
 """
 from __future__ import annotations
 
@@ -15,6 +15,10 @@ import numpy as np
 
 TABLE_Z = 0.75
 TABLE_SIZE = (1.8, 0.6)  # x, y; centred on the arm base
+# bar code scanner on the table top, +x of the arm: a metal frame around a dark glass window. Cosmetic only for now
+# (visual, no collision, not in the planner's world); clear of the pulled-out crates (y < -0.19) and of the arm base
+SCANNER_XY, SCANNER_SIZE = (0.45, -0.02), (0.30, 0.20)  # centre (world x, y), outer size
+SCANNER_H, SCANNER_RIM = 0.010, 0.025  # height above the table top, frame width; the glass sits 1 mm below the frame
 TABLE_EDGE_Y = -0.30  # the table's edge on the drawer side
 # the housings stand HOUSING_GAP beyond the table edge (a filler strip closes the gap): pulled out 0.15 m, the middle
 # crate (in front of the arm base) otherwise comes so close to the base that only 0.12 m could be planned
@@ -33,7 +37,7 @@ CL, CW, CH = 0.6052, 0.4052, 0.1703
 WALL_IN_X, SIDE_IN_Y, FLOOR_T, BAR_Z0, BAR_OUT_X, CRATE_Z0 = 0.290, 0.1965, 0.006, 0.144, 0.3026, 0.002
 SLIDE_MAX = 0.35
 
-# ---- placement (sidebins_test.py) ----
+# ---- placement ----
 PITCH = 2 * W
 BIN_X = (-PITCH, 0.0, PITCH)
 ORIGIN_Y = TABLE_EDGE_Y - HOUSING_GAP - FRONT_X

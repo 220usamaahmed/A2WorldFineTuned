@@ -1,6 +1,6 @@
 """Recorded UR5e episodes (data.npz) -> A2World's LIBERO training layout (docs/DATA.md of the A2World repo).
 
-    python convert_to_train.py --episodes /home/data/siddiquieu1/a2world_ur5e/train --out /home/data/siddiquieu1/a2world_ur5e/train_processed [--also-ext2]
+    python convert_to_train.py --episodes $A2W_DATA/train --out $A2W_DATA/train_processed [--also-ext2]
 
 Output
     clips/agentview_<ep>_clip_<k>.mp4      ext1 (the fixed exterior camera), upright as rendered, 256x256, 10 fps label
@@ -10,7 +10,7 @@ Output
     dataset.json                           [{"caption", "media_path"}] for the agentview clips
     action_stats.json                      percentiles of the raw actions (compare with LIBERO's)
 
-Action convention (see UR5e_finetune_2gpu_plan.md section 5): the training loader multiplies raw action[:6] by 0.05 and
+Action convention: the training loader multiplies raw action[:6] by 0.05 and
 maps the gripper (1 - g) / 2. Raw values are normalised base-frame deltas of the MEASURED TCP pose between consecutive frames:
     raw_pos = clip(delta_pos / POS_SCALE, -1, 1);  raw_rot = clip(delta_rotvec / ROT_SCALE, -1, 1)
     raw_grip = +1 (close) / -1 (open) from the commanded finger angle

@@ -4,6 +4,7 @@
     OMNI_KIT_ACCEPT_EULA=YES python convert_arm.py --headless --simple   # ur5e_gripper_simple.usd (make_simple_gripper.py)
 """
 import argparse
+import sys
 from pathlib import Path
 
 from isaaclab.app import AppLauncher
@@ -17,10 +18,11 @@ simulation_app = AppLauncher(args).app
 from isaaclab.sim.converters import UrdfConverter, UrdfConverterCfg  # noqa: E402
 from pxr import Usd  # noqa: E402
 
-HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # ur5e_sim/
+import paths  # noqa: E402
 NAME = "ur5e_gripper_simple" if args.simple else "ur5e_gripper"
-URDF = HERE / "assets" / f"{NAME}.urdf"
-USD_DIR = HERE / "assets" / "usd"
+URDF = paths.ROBOT_URDF_SIMPLE if args.simple else paths.ROBOT_URDF
+USD_DIR = paths.USD
 
 
 def tune_mimic_joints(usd_path: str, freq: float = 200.0, damping_ratio: float = 1.0) -> int:

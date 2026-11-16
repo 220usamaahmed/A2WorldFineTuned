@@ -5,7 +5,7 @@
 Why: in the original model the pads sit at the end of the four-bar linkage (outer knuckle -> outer finger -> inner finger,
 closed by mimic constraints). In contact the linkage gives way instead of squeezing (finger joint at 0.55 rad with the pad
 where 0.12 rad would put it), and sampled grasps lifted 5-7 of 20 objects on the table although the arm reached every
-grasp (docs/stage2_motion_planning.md).
+grasp (stage 2 tests).
 
 What changes (everything else, incl. all visual meshes, is copied unchanged):
   * the Robotiq finger links (knuckles, fingers, the original pads) lose their colliders and <mimic> tags: they become
@@ -22,6 +22,7 @@ Writes the slide geometry to assets/simple_gripper.json (used by gripper_action.
 """
 import copy
 import json
+import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -29,10 +30,9 @@ import numpy as np
 import yourdfpy
 from scipy.spatial.transform import Rotation as R
 
-HERE = Path(__file__).resolve().parent
-SRC = HERE / "assets" / "ur5e_gripper.urdf"
-DST = HERE / "assets" / "ur5e_gripper_simple.urdf"
-INFO = HERE / "assets" / "simple_gripper.json"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # ur5e_sim/
+import paths  # noqa: E402
+SRC, DST, INFO = paths.ROBOT_URDF, paths.ROBOT_URDF_SIMPLE, paths.SIMPLE_GRIPPER_INFO
 BASE = "robotiq_arg2f_base_link"
 FINGER_LINKS = ["left_outer_knuckle", "left_outer_finger", "left_inner_knuckle", "left_inner_finger", "left_inner_finger_pad",
                 "right_outer_knuckle", "right_outer_finger", "right_inner_knuckle", "right_inner_finger", "right_inner_finger_pad"]
