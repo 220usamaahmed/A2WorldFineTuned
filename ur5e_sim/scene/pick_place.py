@@ -29,6 +29,9 @@ sys.stdout.reconfigure(line_buffering=True)
 from isaaclab.app import AppLauncher
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
+import paths  # noqa: E402
+
 ap = argparse.ArgumentParser()
 ap.add_argument("--episodes", type=int, default=6)
 ap.add_argument("--seed", type=int, default=0)
@@ -42,7 +45,7 @@ ap.add_argument("--slide-damping", type=float, default=15.0)
 ap.add_argument("--candidates", type=int, default=40, help="sampled grasps handed to the planner per pick")
 ap.add_argument("--drawer-objects", default="", help="3 YCB keys, one per crate (default: random from the short set)")
 ap.add_argument("--shelf-objects", default="", help="4 YCB keys, 2 per level (default: random from the tall set)")
-ap.add_argument("--out", type=Path, default=Path("/home/data/siddiquieu1/scene_previews/pick_place"))
+ap.add_argument("--out", type=Path, default=paths.EPISODES)
 ap.add_argument("--tag", default="")
 ap.add_argument("--stills", action="store_true",
                 help="only render high-resolution stills of the scene (crates closed, then pulled out) to --out, then exit")
@@ -91,10 +94,8 @@ from grasps import cached_grasps, collider_mesh, graspable_stable_poses, world_f
 from planner import ArmPlanner, Plan, pregrasp  # noqa: E402
 from tasks import T_of, clear_container_walls, drop_poses, plan_extraction, pose7  # noqa: E402
 
-ASSETS = Path("/home/data/siddiquieu1/assets")
-ISAAC = ASSETS / "Isaac/5.1/Isaac"
-PHYS, MESHES = ASSETS / "ycb_physics", ASSETS / "ycb_meshes"
-BIN_USD = HERE.parent / "assets" / "usd" / "pullbin.usd"
+ISAAC, PHYS, MESHES = paths.ISAAC, paths.YCB_PHYSICS, paths.YCB_MESHES
+BIN_USD = paths.USD / "pullbin.usd"
 SHORT = ["005_tomato_soup_can", "008_pudding_box", "009_gelatin_box", "010_potted_meat_can", "061_foam_brick", "011_banana"]
 TALL = ["006_mustard_bottle", "004_sugar_box", "003_cracker_box", "021_bleach_cleanser"]
 Q_HOOK = np.array([*R.from_matrix(np.stack([[0, 1, 0], [1, 0, 0], [0, 0, -1]], 1)).as_quat()[[3, 0, 1, 2]]])  # fingers along y
@@ -210,9 +211,6 @@ def _split_top(lo, hi, t=L.T):
 
 @configclass
 class SceneCfg(E.SceneCfg):
-    cube = None
-    cam_ext1 = None
-    cam_ext2 = None
     ground = AssetBaseCfg(prim_path="/World/ground", spawn=sim_utils.GroundPlaneCfg(visible=False))  # backdrop floor: looks.py
     sky = _SKY
     sun = _SUN
@@ -245,7 +243,7 @@ class SceneCfg(E.SceneCfg):
 
 
 @configclass
-class EnvCfg(E.Ur5eTableJointEnvCfg):
+class EnvCfg(E.Ur5eEnvCfg):
     scene: SceneCfg = SceneCfg(num_envs=1, env_spacing=8.0)
 
 

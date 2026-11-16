@@ -1,13 +1,13 @@
 """Geometry of the side-bins scene as plain numbers (no Isaac imports): table, three drawer housings with sliding crates.
 
-Used by the Isaac scene (sidebins_curobo.py) and by the cuRobo collision world. Frames:
-  * world: z up, arm base on the table top at the origin (as in ur5e_env / sidebins_test.py)
+Used by the Isaac scene (pick_place.py) and by the cuRobo collision world. Frames:
+  * world: z up, arm base on the table top at the origin (as in ur5e_env)
   * base: the arm-base frame = world shifted down by TABLE_Z (what the planner and the arm actions use)
   * housing i: origin on the floor under the housing centre, local +x = pull direction; placed at (BIN_X[i], ORIGIN_Y, 0)
     and yawed +90 deg, so local +x -> world +y and local +y -> world -x
   * crate: origin at the centre of the crate bottom, offset by the slide along housing +x
 
-Numbers MUST match build_pullbin.py (the USD's colliders) and sidebins_test.py (the placement).
+Numbers MUST match setup/build_pullbin.py (the USD's colliders).
 """
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ CL, CW, CH = 0.6052, 0.4052, 0.1703
 WALL_IN_X, SIDE_IN_Y, FLOOR_T, BAR_Z0, BAR_OUT_X, CRATE_Z0 = 0.290, 0.1965, 0.006, 0.144, 0.3026, 0.002
 SLIDE_MAX = 0.35
 
-# ---- placement (sidebins_test.py) ----
+# ---- placement ----
 PITCH = 2 * W
 BIN_X = (-PITCH, 0.0, PITCH)
 ORIGIN_Y = TABLE_EDGE_Y - HOUSING_GAP - FRONT_X

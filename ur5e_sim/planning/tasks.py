@@ -1,5 +1,5 @@
 """Pick-and-place building blocks on top of ArmPlanner: getting a grasped object out of a drawer crate or a shelf, and
-drop poses in the container. Used by planning/test_shelf_container.py and scene/pick_place.py.
+drop poses in the container. Used by scene/pick_place.py.
 
 Frames as in planner.py (arm-base frame); 4x4 matrices for poses, pose7 = (x y z qw qx qy qz).
 """

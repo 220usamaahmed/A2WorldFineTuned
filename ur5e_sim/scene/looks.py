@@ -19,11 +19,15 @@ from __future__ import annotations
 import urllib.request
 from pathlib import Path
 
+import sys
+
 import numpy as np
 
-import layout as L
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # ur5e_sim/
+import layout as L  # noqa: E402
+import paths  # noqa: E402
 
-NVIDIA = Path("/home/data/siddiquieu1/assets/Isaac/5.1/NVIDIA")
+NVIDIA = paths.NVIDIA
 BUCKET = "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/NVIDIA"
 WOOD_MDL = NVIDIA / "Materials/Base/Wood/Walnut.mdl"  # Oak.mdl (light, orange) is fetched too
 WALL_MDL = NVIDIA / "Materials/Base/Wall_Board/Plaster.mdl"

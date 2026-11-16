@@ -68,7 +68,9 @@ def gripper_boxes_from_urdf(margin: float = 0.003, slices: int = 4, finger: floa
     sys.path.insert(0, str(sim))
     import robot_defs as n
 
-    urdf = yourdfpy.URDF.load(str(sim / "assets" / "ur5e_gripper.urdf"), build_collision_scene_graph=True,
+    import paths
+
+    urdf = yourdfpy.URDF.load(str(paths.ROBOT_URDF), build_collision_scene_graph=True,
                               load_collision_meshes=True, build_scene_graph=False, load_meshes=False)
     cfg = {j: 0.0 for j in urdf.actuated_joint_names}
     cfg[n.GRIPPER_DRIVEN_JOINT] = finger
@@ -205,7 +207,7 @@ class AntipodalSampler:
         return grasps[:max_grasps] if max_grasps else grasps
 
 
-# objects whose simulated collider is a convex hull (scene/make_ycb_physics.py HULL, and Isaac's own physics variants of
+# objects whose simulated collider is a convex hull (setup/make_ycb_physics.py HULL, and Isaac's own physics variants of
 # the cracker box, sugar box and soup can): grasps must be sampled on the hull, not on the visual mesh (whose can rims
 # offered 4 mm "grasps" that do not exist in the physics)
 HULL_COLLIDER = {"002_master_chef_can", "003_cracker_box", "004_sugar_box", "005_tomato_soup_can", "007_tuna_fish_can",
@@ -218,8 +220,12 @@ def collider_mesh(key: str, obj_file) -> trimesh.Trimesh:
     return m.convex_hull if key in HULL_COLLIDER else m
 
 
-def cached_grasps(key: str, obj_file, cache_dir=Path("/home/data/siddiquieu1/assets/grasp_cache"), **kw) -> list[Grasp]:
+def cached_grasps(key: str, obj_file, cache_dir=None, **kw) -> list[Grasp]:
     """Object-frame grasps of one object (sampled on its simulated collider shape), stored as <cache_dir>/<key>.npz."""
+    if cache_dir is None:
+        import paths
+
+        cache_dir = paths.GRASP_CACHE
     f = Path(cache_dir) / f"{key}.npz"
     if f.exists():
         d = np.load(f)

@@ -36,9 +36,18 @@ from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGen
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
+import paths  # noqa: E402
 import robot_defs as n  # noqa: E402
 
-ROBOT_YML = HERE / "ur5e_2f85.yml"
+
+def load_robot_cfg() -> dict:
+    """planning/ur5e_2f85.yml with its URDF paths (relative to ur5e_sim/) made absolute."""
+    cfg = load_yaml(str(paths.ROBOT_YML))["robot_cfg"]
+    k = cfg["kinematics"]
+    k["urdf_path"], k["asset_root_path"] = str(paths.SIM / k["urdf_path"]), str(paths.SIM / k["asset_root_path"])
+    return cfg
+
+
 HOME_TCP = (0.35, 0.0, 0.35)  # arm-base frame, tool pointing down
 GRIPPER_LINKS = [
     "robotiq_arg2f_base_link", "left_outer_knuckle", "right_outer_knuckle", "left_outer_finger", "right_outer_finger",
@@ -77,7 +86,7 @@ class ArmPlanner:
         # motion), so it interpolates finely and _to_plan resamples to the control step
         interpolation_dt = 0.02
         self.time_dilation = time_dilation
-        robot_cfg = load_yaml(str(ROBOT_YML))["robot_cfg"]
+        robot_cfg = load_robot_cfg()
         cfg = MotionGenConfig.load_from_robot_config(
             robot_cfg, world, tensor_args=self.tdt,
             collision_checker_type=CollisionCheckerType.MESH,

@@ -1,10 +1,11 @@
-"""UR5e + Robotiq 2F-85 on a table (Isaac Lab): one cube, three RGB cameras, TCP-pose control.
+"""Base Isaac Lab environment: the UR5e + Robotiq 2F-85 on a table, a wrist camera, joint-space control.
+scene/pick_place.py extends the scene (furniture, objects, cameras).
 
 Frames: world z up; the arm base sits on the table top at the world origin facing +x. All robot poses
 reported by this module are in the arm-base frame (= world frame translated by TABLE_Z in z).
 
-Action (dim 8): [TCP x y z qw qx qy qz in the arm-base frame | finger angle [rad], 0 open ... 0.8 closed]
-Control 10 Hz (physics 120 Hz); cameras are rendered once per control step.
+Action (dim 7): [6 arm joint positions to reach at the end of the control step, in robot_defs.ARM_JOINTS order |
+finger angle [rad], 0 open ... 0.8 closed]. Control 10 Hz (physics 120 Hz); cameras render once per control step.
 
 Import only after the Isaac Sim app has been launched.
 """
@@ -15,15 +16,9 @@ import numpy as np
 
 import isaaclab.sim as sim_utils
 from isaaclab.actuators import ImplicitActuatorCfg
-from isaaclab.assets import ArticulationCfg, AssetBaseCfg, RigidObjectCfg
-from isaaclab.controllers import DifferentialIKControllerCfg
+from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
-from isaaclab.envs.mdp import (
-    DifferentialInverseKinematicsActionCfg,
-    joint_pos,
-    reset_scene_to_default,
-    time_out,
-)
+from isaaclab.envs.mdp import joint_pos, reset_scene_to_default, time_out
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
@@ -37,17 +32,16 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))  # sibling modules import regardless of the working directory
 from gripper_action import MimicGripperPositionActionCfg, SimpleGripperActionCfg  # noqa: E402  (gripper controllers, see their headers)
 from joint_traj_action import JointTrajectoryActionCfg  # noqa: E402
+import paths  # noqa: E402
 import robot_defs as n  # noqa: E402
 
-USD_PATH = HERE / "assets" / "usd" / "ur5e_gripper.usd"
-USD_PATH_SIMPLE = HERE / "assets" / "usd" / "ur5e_gripper_simple.usd"  # make_simple_gripper.py + convert_arm.py --simple
+USD_PATH = paths.USD / "ur5e_gripper.usd"
+USD_PATH_SIMPLE = paths.USD / "ur5e_gripper_simple.usd"  # make_simple_gripper.py + convert_arm.py --simple
 
 # ---- geometry [m] ---------------------------------------------------------------------------------
 TABLE_Z = 0.75  # table top height; the arm base is mounted on the table top at the world origin
 TABLE_X = (-0.15, 0.95)  # table extent along x
 TABLE_HALF_Y = 0.35  # table edge at y = +-0.35
-CUBE_SIZE = 0.05
-CUBE_Z = CUBE_SIZE / 2  # cube centre height above the table (arm-base frame)
 CONTROL_DT = 0.1  # 10 Hz
 PHYSICS_DT = 1.0 / 120.0
 IMG = 256
@@ -65,13 +59,7 @@ READY_Q = n.ARM_READY
 READY_TCP = (0.395, 0.0, 0.034)
 TOOL_DOWN_QUAT = (0.0, 1.0, 0.0, 0.0)  # (w, x, y, z): 180 deg about x
 
-# ---- camera poses (world frame, look-at) ------------------------------------------------------------
-LOOK_AT = (0.42, 0.0, TABLE_Z)
-CAMERAS = {
-    "ext1": dict(eye=(1.15, 0.62, TABLE_Z + 0.55)),
-    "ext2": dict(eye=(1.15, -0.62, TABLE_Z + 0.55)),
-}
-CAM_FOCAL_MM = 15.0  # with the default 20.955 mm aperture: ~70 deg horizontal field of view
+# ---- wrist camera ------------------------------------------------------------------------------------
 WRIST_OFFSET = (0.095, 0.0, 0.03)  # in the ur5e_tool0 frame
 WRIST_TARGET = (0.0, 0.0, 0.30)  # point the wrist camera looks at, in the ur5e_tool0 frame
 WRIST_FOCAL_MM = 12.0  # ~82 deg
@@ -153,22 +141,6 @@ class SceneCfg(InteractiveSceneCfg):
         init_state=AssetBaseCfg.InitialStateCfg(pos=(0.5 * (TABLE_X[0] + TABLE_X[1]), 0.0, TABLE_Z / 2)),
     )
     robot: ArticulationCfg = _robot_cfg()
-    cube = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/cube",
-        spawn=sim_utils.CuboidCfg(
-            size=(CUBE_SIZE,) * 3,
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(max_depenetration_velocity=1.0),
-            mass_props=sim_utils.MassPropertiesCfg(mass=0.1),
-            collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.85, 0.12, 0.12)),
-            physics_material=sim_utils.RigidBodyMaterialCfg(
-                static_friction=1.5, dynamic_friction=1.5, restitution=0.0, friction_combine_mode="max"
-            ),
-        ),
-        init_state=RigidObjectCfg.InitialStateCfg(pos=(0.6, 0.2, TABLE_Z + CUBE_Z)),
-    )
-    cam_ext1 = _camera("cam_ext1", CAMERAS["ext1"]["eye"], CAM_FOCAL_MM, rot=look_at_quat(CAMERAS["ext1"]["eye"], LOOK_AT))
-    cam_ext2 = _camera("cam_ext2", CAMERAS["ext2"]["eye"], CAM_FOCAL_MM, rot=look_at_quat(CAMERAS["ext2"]["eye"], LOOK_AT))
     # on the tool flange; tool +x is "up" in the image, so the fingers (which close along tool y) appear at the bottom
     cam_wrist = _camera(
         "cam_wrist", WRIST_OFFSET, WRIST_FOCAL_MM, parent="{ENV_REGEX_NS}/Robot/ur5e_tool0",
@@ -178,22 +150,7 @@ class SceneCfg(InteractiveSceneCfg):
 
 @configclass
 class ActionsCfg:
-    arm = DifferentialInverseKinematicsActionCfg(
-        asset_name="robot",
-        joint_names=list(n.ARM_JOINTS),
-        body_name=n.EE_LINK,
-        body_offset=DifferentialInverseKinematicsActionCfg.OffsetCfg(pos=(0.0, 0.0, n.TCP_OFFSET_Z)),
-        controller=DifferentialIKControllerCfg(command_type="pose", use_relative_mode=False, ik_method="dls"),
-    )
-    gripper = MimicGripperPositionActionCfg(
-        asset_name="robot", driven_joints=list(GRIPPER_DRIVEN), followers=GRIPPER_FOLLOWERS
-    )
-
-
-@configclass
-class JointActionsCfg:
-    """Arm commanded in joint space (planned trajectories, see planning/), gripper as above. Action (dim 7):
-    [6 arm joint positions to reach at the end of the control step, in robot_defs.ARM_JOINTS order | finger angle]."""
+    """Arm: planned joint trajectories (planning/); gripper: linkage model (use_simple_gripper replaces it)."""
 
     arm = JointTrajectoryActionCfg(asset_name="robot", joint_names=list(n.ARM_JOINTS))
     gripper = MimicGripperPositionActionCfg(
@@ -232,7 +189,7 @@ class TerminationsCfg:
 
 
 @configclass
-class Ur5eTableEnvCfg(ManagerBasedRLEnvCfg):
+class Ur5eEnvCfg(ManagerBasedRLEnvCfg):
     scene: SceneCfg = SceneCfg(num_envs=1, env_spacing=4.0)
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
@@ -250,20 +207,13 @@ class Ur5eTableEnvCfg(ManagerBasedRLEnvCfg):
         self.viewer.lookat = (0.4, 0.0, TABLE_Z + 0.1)
 
 
-@configclass
-class Ur5eTableJointEnvCfg(Ur5eTableEnvCfg):
-    """Same scene, arm driven by joint-space targets (JointActionsCfg) instead of the differential-IK TCP pose."""
-
-    actions: JointActionsCfg = JointActionsCfg()
-
-
 # ---- simplified gripper physics (stage 2) ---------------------------------------------------------------
 SIMPLE_LEFT = {n.GRIPPER_DRIVEN_JOINT: 1.0, "left_inner_knuckle_joint": 1.0, "left_inner_finger_joint": -1.0}
 SIMPLE_RIGHT = {"right_outer_knuckle_joint": 1.0, "right_inner_knuckle_joint": 1.0, "right_inner_finger_joint": -1.0}
 
 
 def use_simple_gripper(cfg, grip_force: float = 20.0, pad_speed: float = 0.10):
-    """Switch an env cfg (any of the above) to the gripper with simplified physics: two sliding pads squeezing with
+    """Switch an env cfg to the gripper with simplified physics: two sliding pads squeezing with
     ``grip_force`` [N] each (the real 2F-85: 20-235 N; in PhysX, 20-30 N hold a 5 cm cube with <= 1.5 mm penetration,
     40 N pushes the pads through it), closing at up to ``pad_speed`` [m/s] (real: 20-150 mm/s); the
     Robotiq linkage is visual only and follows the pads (gripper_action.SimpleGripperAction). Same action meaning."""
@@ -278,6 +228,6 @@ def use_simple_gripper(cfg, grip_force: float = 20.0, pad_speed: float = 0.10):
                                     damping=30.0, effort_limit_sim=grip_force, velocity_limit_sim=pad_speed),
         "linkage": ImplicitActuatorCfg(joint_names_expr=list(SIMPLE_LEFT) + list(SIMPLE_RIGHT), stiffness=100.0, damping=5.0),
     }
-    cfg.actions.gripper = SimpleGripperActionCfg(asset_name="robot", info_path=str(HERE / "assets" / "simple_gripper.json"),
+    cfg.actions.gripper = SimpleGripperActionCfg(asset_name="robot", info_path=str(paths.SIMPLE_GRIPPER_INFO),
                                                  left_linkage=SIMPLE_LEFT, right_linkage=SIMPLE_RIGHT, coupling=0.005)
     return cfg
