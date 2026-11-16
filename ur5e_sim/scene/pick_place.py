@@ -48,6 +48,8 @@ ap.add_argument("--stills", action="store_true",
                 help="only render high-resolution stills of the scene (crates closed, then pulled out) to --out, then exit")
 ap.add_argument("--stills-size", default="1920x1080", help="WxH of the stills")
 ap.add_argument("--stills-open", default="0,1,2", help="crates (0 = -x .. 2 = +x) pulled out for the 'open' stills")
+ap.add_argument("--no-video", action="store_true",
+                help="no episode cameras or videos (saves GPU memory, e.g. when watching via --livestream 2)")
 ap.add_argument("--stills-cams", default="", help="comma-separated subset of the STILLS cameras (default: all; each costs GPU memory)")
 AppLauncher.add_app_launcher_args(ap)
 args = ap.parse_args()
@@ -262,6 +264,8 @@ STILLS = {
     "drawers": ((0.6, 0.15, 1.95), (-0.05, -0.62, 0.8), 16.0),
 }
 cfg = EnvCfg()
+if args.no_video:
+    cfg.scene.cam_a = cfg.scene.cam_b = cfg.scene.cam_wrist = None
 if args.stills:
     if args.stills_cams:
         STILLS = {k: STILLS[k] for k in args.stills_cams.split(",")}
@@ -309,7 +313,7 @@ def q_meas():
 
 def step(q, grip):
     env.step(torch.tensor([[*q, grip]], dtype=torch.float32, device=dev))
-    if args.stills:
+    if args.stills or args.no_video:
         return
     frames.append(np.concatenate([env.scene[c].data.output["rgb"][0].cpu().numpy()[..., :3].astype(np.uint8)
                                   for c in ("cam_a", "cam_b", "cam_wrist")], 1))
@@ -606,7 +610,8 @@ for ep in range(args.episodes):
     rec["ok"] = any(a.get("ok") for a in rec["attempts"])
     rec["motions"] = list(motions)
     records.append(rec)
-    imageio.mimwrite(args.out / f"ep{ep:02d}{args.tag}.mp4", frames, fps=10, macro_block_size=1)
+    if frames:
+        imageio.mimwrite(args.out / f"ep{ep:02d}{args.tag}.mp4", frames, fps=10, macro_block_size=1)
     (args.out / f"episodes{args.tag}.json").write_text(json.dumps(records, indent=1, default=float))
 
 print("\nSUMMARY")
