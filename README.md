@@ -5,7 +5,7 @@ A UR5e + Robotiq 2F-85 in Isaac Sim picks objects from drawers and a shelf and p
 
 ## Setup
 
-- **Simulation:** Isaac Sim 5.1, Isaac Lab 2.3.2 and cuRobo, in one Python environment.
+- **Simulation:** Isaac Sim 5.1, Isaac Lab 2.3.2 and cuRobo, in one Python environment. To build it, follow [docs/isaac_env.md](docs/isaac_env.md).
 - **Fine-tuning:** A2World's own environment, `A2World/world_model/.venv` (see `A2World/README.md`). The patches in `docs/env_patches/` are needed to train.
 - **Data folder:** large files go under `$A2W_DATA` (default `./data`). Set it in your shell profile:
   ```bash
