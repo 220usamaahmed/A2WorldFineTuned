@@ -28,6 +28,10 @@ from pathlib import Path
 sys.stdout.reconfigure(line_buffering=True)
 from isaaclab.app import AppLauncher
 
+# ======================================================================================================================
+# 1. COMMAND-LINE OPTIONS AND ISAAC SIM START-UP
+#   Isaac Sim has to be running before anything from isaaclab (other than the AppLauncher) can be imported.
+# ======================================================================================================================
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 import paths  # noqa: E402
@@ -60,6 +64,7 @@ args.enable_cameras = True
 app = AppLauncher(args).app
 
 
+# on a crash, exit at once (otherwise Isaac can hang in shutdown and keep its GPU memory)
 def _die(exc_type, exc, tb):
     """An uncaught exception must not leave Isaac hanging in shutdown with its GPU memory (a crashed run sat on 12 GB)."""
     import os
@@ -73,6 +78,11 @@ def _die(exc_type, exc, tb):
 
 sys.excepthook = _die
 
+# ======================================================================================================================
+# 2. IMPORTS THAT NEED THE RUNNING APP, AND THIS PROJECT'S MODULES
+#   layout = scene geometry (numbers), looks = textures/lights, ur5e_env = base env (robot, wrist camera, actions),
+#   grasps / planner / tasks = grasp sampling and cuRobo motion planning (planning/).
+# ======================================================================================================================
 import imageio.v2 as imageio  # noqa: E402
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
@@ -94,6 +104,9 @@ from grasps import cached_grasps, collider_mesh, graspable_stable_poses, world_f
 from planner import ArmPlanner, Plan, pregrasp  # noqa: E402
 from tasks import T_of, clear_container_walls, drop_poses, plan_extraction, pose7  # noqa: E402
 
+# ======================================================================================================================
+# 3. CONSTANTS: asset locations, which YCB objects may go where, gripper orientation for hooking a crate
+# ======================================================================================================================
 ISAAC, PHYS, MESHES = paths.ISAAC, paths.YCB_PHYSICS, paths.YCB_MESHES
 BIN_USD = paths.USD / "pullbin.usd"
 SHORT = ["005_tomato_soup_can", "008_pudding_box", "009_gelatin_box", "010_potted_meat_can", "061_foam_brick", "011_banana"]
@@ -102,7 +115,11 @@ Q_HOOK = np.array([*R.from_matrix(np.stack([[0, 1, 0], [1, 0, 0], [0, 0, -1]], 1
 to_base = np.array([0.0, 0.0, L.TABLE_Z])
 rng = np.random.default_rng(args.seed)
 
-# ---------------------------------------------------------------- objects: 3 in the crates (one each), 4 on the shelf
+# ======================================================================================================================
+# 4. OBJECTS: 3 in the crates (one each), 4 on the shelf
+#   Pick the YCB objects (by --seed), load their meshes and pre-computed grasps (cached on disk),
+#   and define random_layout(): a random start pose for every object (also used at each episode reset).
+# ======================================================================================================================
 drawer_keys = args.drawer_objects.split(",") if args.drawer_objects else list(rng.choice(SHORT, 3, replace=False))
 shelf_keys = args.shelf_objects.split(",") if args.shelf_objects else list(rng.choice(TALL, 4, replace=len(TALL) < 4))
 KEYS = drawer_keys + shelf_keys
@@ -158,10 +175,16 @@ def random_layout():
     return out
 
 
-layout0 = random_layout()
+layout0 = random_layout()  # start poses for the first episode (the scene is built with these)
 
 
-# ---------------------------------------------------------------- scene
+# ======================================================================================================================
+# 5. SCENE: what Isaac builds
+#   Factory functions for the parts, the two overview cameras, then SceneCfg = the base scene of ur5e_env
+#   (ground, lights, robot, wrist camera) plus desk, drawers, shelf, counter, container and objects.
+#   All sizes and positions come from layout.py; the look (wood, paint, room) is added later by looks.py.
+# ======================================================================================================================
+# a drawer: housing + sliding crate (setup/build_pullbin.py), an articulation with one prismatic joint 'crate_slide'
 def bin_cfg(i):
     return ArticulationCfg(
         prim_path=f"{{ENV_REGEX_NS}}/bin{i}",
@@ -172,6 +195,7 @@ def bin_cfg(i):
     )
 
 
+# a YCB object as a free rigid body (physics version from setup/make_ycb_physics.py)
 def obj_cfg(i):
     return RigidObjectCfg(
         prim_path=f"{{ENV_REGEX_NS}}/obj{i}",
@@ -180,6 +204,7 @@ def obj_cfg(i):
     )
 
 
+# a static box with a collider (shelf boards and walls, desk, counter ends)
 def board_cfg(name, lo, hi, prefix="shelf"):
     lo, hi = np.asarray(lo, float), np.asarray(hi, float)
     return AssetBaseCfg(
@@ -209,6 +234,7 @@ def _split_top(lo, hi, t=L.T):
     return (lo, np.r_[hi[:2], hi[2] - t]), (np.r_[lo[:2], hi[2] - t], hi)
 
 
+# the full scene; attribute names become prim names (/World/envs/env_0/<name>) and keys of env.scene[...]
 @configclass
 class SceneCfg(E.SceneCfg):
     ground = AssetBaseCfg(prim_path="/World/ground", spawn=sim_utils.GroundPlaneCfg(visible=False))  # backdrop floor: looks.py
@@ -242,15 +268,26 @@ class SceneCfg(E.SceneCfg):
     cam_b = E._camera("cam_b", EYE_B, 14.0, rot=E.look_at_quat(EYE_B, LOOK_B))
 
 
+# the environment = this scene + ur5e_env's actions (arm joints + gripper), 10 Hz control, 120 Hz physics
 @configclass
 class EnvCfg(E.Ur5eEnvCfg):
     scene: SceneCfg = SceneCfg(num_envs=1, env_spacing=8.0)
 
 
+# ======================================================================================================================
+# 6. MOTION PLANNER (cuRobo)
+#   It has its OWN collision model of the scene, built from layout.py (not read from Isaac). sync_world() below
+#   copies the simulated object poses and crate positions into it before each motion.
+# ======================================================================================================================
 objects0 = [(f"obj{i}", MESHES / f"{KEYS[i]}.obj", np.r_[layout0[i][:3] - to_base, layout0[i][3:]]) for i in range(7)]
 planner = ArmPlanner(L.world_config(objects=objects0, shelf=True, container=True, fillers=True), time_dilation=args.speed)
 HOME = planner.home
 
+# ======================================================================================================================
+# 7. BUILD THE SIMULATION
+#   Final config tweaks (cameras off for --no-video, extra cameras for --stills, simplified gripper, start pose),
+#   then create the env, apply the look (looks.py) and get handles to the robot, objects and drawers.
+# ======================================================================================================================
 # --stills: extra high-resolution cameras, name -> (eye, look-at, focal length [mm]), world frame
 STILLS = {
     "front": ((0.9, -2.5, 2.3), (0.0, 0.0, 0.85), 18.0),
@@ -273,10 +310,10 @@ if args.stills:
         c = E._camera(f"still_{nm}", eye, focal, rot=E.look_at_quat(eye, look))
         c.width, c.height, c.update_period = sw, sh, 0.0
         setattr(cfg.scene, f"still_{nm}", c)
-E.use_simple_gripper(cfg, grip_force=args.grip_force)
+E.use_simple_gripper(cfg, grip_force=args.grip_force)  # two force-limited sliding pads (see gripper_action.py)
 cfg.scene.robot.init_state.joint_pos.update(dict(zip(n.ARM_JOINTS, map(float, HOME))))
-env = ManagerBasedRLEnv(cfg)
-LK.apply(env.scene.stage)
+env = ManagerBasedRLEnv(cfg)  # builds the scene in Isaac Sim
+LK.apply(env.scene.stage)  # materials, lights, backdrop room, scanner pad (visual only)
 env.reset()
 dev = env.device
 robot = env.scene["robot"]
@@ -285,6 +322,7 @@ OBJS = [env.scene[f"obj{i}"] for i in range(7)]
 BINS = [env.scene[f"bin{i}"] for i in range(3)]
 
 
+# same friction on the gripper and all objects (--friction)
 def set_friction(asset, mu):
     m = asset.root_physx_view.get_material_properties()
     m[..., 0], m[..., 1] = mu, mu
@@ -296,7 +334,12 @@ for o in OBJS:
     set_friction(o, args.friction)
 print("object masses [kg]:", {KEYS[i]: round(float(o.root_physx_view.get_masses()[0].sum()), 3) for i, o in enumerate(OBJS)}, flush=True)
 
-# ---------------------------------------------------------------- sim helpers
+# ======================================================================================================================
+# 8. CONTROL HELPERS: how the script moves the robot
+#   step() sends ONE 10 Hz action to the env: 6 arm joint targets + 1 gripper value (and records the camera frames).
+#   run() plays a planned trajectory step by step; hold() waits; set_grip() opens/closes the gripper gradually.
+#   state = the last commanded arm configuration and gripper value.
+# ======================================================================================================================
 frames, motions = [], []
 state = {"q": np.array(HOME, float), "grip": 0.0}
 
@@ -356,28 +399,32 @@ def set_grip_force(mass):
     return round(f, 1)
 
 
+# ======================================================================================================================
+# 9. STATE HELPERS: read the simulation, keep the planner's world in sync, reset an episode
+# ======================================================================================================================
+# a failed plan aborts the current attempt (caught in the episode loop)
 def need(plan, what):
     if plan is None:
         raise Fail(f"planning failed: {what}")
     return plan
 
 
-def obj_T(i):  # base frame
+def obj_T(i):  # pose of object i as a 4x4 matrix in the arm-base frame
     o = OBJS[i]
     return T_of(np.r_[o.data.root_pos_w[0].cpu().numpy() - to_base, o.data.root_quat_w[0].cpu().numpy()])
 
 
-def slide(i):
+def slide(i):  # how far crate i is pulled out [m]
     return float(BINS[i].data.joint_pos[0, 0])
 
 
-def latch(i, on):
+def latch(i, on):  # hold crate i where it is (on) or let it slide freely (off)
     BINS[i].write_joint_stiffness_to_sim(torch.tensor([[args.latch_stiffness if on else 0.0]], device=dev))
     if on:
         BINS[i].set_joint_position_target(BINS[i].data.joint_pos.clone())
 
 
-def sync_world():
+def sync_world():  # copy crate and object poses from the simulation into the planner's world
     for i in range(3):
         for nm, c, _ in L.bin_boxes(i, slide(i)):
             if "crate" in nm:
@@ -387,11 +434,11 @@ def sync_world():
             planner.set_obstacle_pose(f"obj{i}", pose7(obj_T(i)))
 
 
-def gap_to_angle(gap):
+def gap_to_angle(gap):  # finger opening [m] -> gripper command (finger angle, rad)
     return float(np.clip(0.8 * (1.0 - gap / 0.085), 0.0, E.GRIPPER_CLOSED))
 
 
-def reset_episode():
+def reset_episode():  # close the crates, new random object poses, robot at home
     planner.detach()
     env.reset()
     for i in range(3):
@@ -404,16 +451,24 @@ def reset_episode():
     sync_world()
 
 
-# ---------------------------------------------------------------- task phases
+# ======================================================================================================================
+# 10. TASK PHASES: what the robot does in an episode
+#   open_drawer(i) -> pick(i) -> place(...) -> go_home(). Each one plans with cuRobo, then executes with run().
+#   A phase raises Fail when it cannot continue; the episode loop then tries the next object.
+# ======================================================================================================================
 def open_drawer(i):
+    """Hook crate i's rim bar with the gripper and pull the crate out. Returns how far it is out [m]."""
     crate = L.crate_box_names(i)
     wall = np.r_[L.BIN_X[i], L.WALL_Y + slide(i), L.BAR_Z - L.TABLE_Z, Q_HOOK]
+    # 1. move 12 cm above the rim bar, open the fingers to the hook gap
     sync_world()
     run(need(planner.plan_pose(state["q"], wall + np.r_[0, 0, 0.12, 0, 0, 0, 0], tag="to the rim bar"), "to the rim bar"), "to the rim bar", grip=0.0)
     set_grip(gap_to_angle(args.hook_gap), steps=8)
-    with planner.relaxed(ignore=crate):
+    with planner.relaxed(ignore=crate):  # the gripper has to touch the crate now
+        # 2. lower straight onto the bar and close the gripper around it
         run(need(planner.plan_linear(state["q"], wall, frame="base", free_axis=2), "onto the bar"), "onto the bar")
         set_grip(E.GRIPPER_CLOSED, steps=10)
+        # 3. plan the pull
         # the longest pull whose unhook also works and ends collision-free with the crate back in the planner's world
         # (bin 1, in front of the base: at 0.15 m the folded arm self-collides; at 0.135 m the unhooked arm overlaps the
         # crate and every later plan is refused as starting in collision)
@@ -440,6 +495,7 @@ def open_drawer(i):
                 break
         if chosen is None:
             raise Fail("planning failed: no pull distance with a collision-free unhook")
+        # 4. pull, hold the crate there, open the fingers and lift off the bar
         d, pull, off = chosen
         run(pull, f"pull {d:.3f} m")
         latch(i, True)
@@ -455,6 +511,8 @@ def pick(i):
     sync_world()
     T0 = obj_T(i)
     support = (L.FLOOR_TOP - L.TABLE_Z) if src == "drawer" else (L.SHELF_LEVELS[(i - 3) // 2] - L.TABLE_Z)
+    # 1. candidate grasps: the object's pre-computed grasps moved to its current pose, minus those that would hit the
+    #    support (crate floor / shelf board); then a score-weighted random order
     inf = INFO[k]
     Ts = T0 @ inf["G"]
     keep = world_filter(Ts, floor_z=support, min_clear=0.004, widths=inf["widths"])
@@ -467,6 +525,7 @@ def pick(i):
     p = np.exp((sc - sc.max()) / 0.3)
     order = rng.choice(idx, size=min(args.candidates, len(idx)), replace=False, p=p / p.sum())
     cand = np.array([pose7(Ts[j]) for j in order])
+    # 2. plan: the first candidate whose approach AND way out (lift + extraction, planning/tasks.py) both plan
     ext = {}
 
     def check(gi, to_pre, app):
@@ -483,6 +542,7 @@ def pick(i):
     Tg = Ts[order[gi]]
     rec = dict(grasp=int(order[gi]), width_mm=round(float(inf["widths"][order[gi]]) * 1000, 1),
                approach_deg=round(float(np.degrees(np.arccos(np.clip(-Tg[2, 2], -1, 1)))), 1), plan_s=round(t_plan, 1))
+    # 3. execute: to 10 cm before the grasp, approach, squeeze (force set from the object's mass), lift
     run(to_pre, "to pregrasp", grip=0.0)
     run(approach, "approach")
     rec["grip_force_N"] = set_grip_force(OBJ_MASS[i])
@@ -492,6 +552,7 @@ def pick(i):
     rose = obj_T(i)[2, 3] - T0[2, 3]
     if rose < 0.015:
         raise Fail(f"object not in the gripper (rose {rose * 1000:.0f} mm)")
+    # 4. tell the planner the object is now in the hand, then move it out of the crate / shelf
     planner.set_obstacle_pose(f"obj{i}", pose7(obj_T(i)))
     planner.attach(q_meas(), f"obj{i}")
     run(out, "out of the drawer" if src == "drawer" else "out of the shelf")
@@ -499,9 +560,12 @@ def pick(i):
 
 
 def place(i, T0, support, width):
+    """Put the held object i into the container, in the orientation it had at its source. Returns a result record."""
+    # 1. drop poses: positions x yaws in the container, raised where the fingers would hit its walls
     T_held = np.linalg.inv(T_of(planner.fk(q_meas()))) @ obj_T(i)
     drops = drop_poses(T_held, T0, support, rng, n_xy=3, yaws=(0, 45, 90, 135, 180, -135, -90, -45), footprint=footprint(KEYS[i], T0) + 0.01)
     drops, raised = clear_container_walls(drops, width)
+    # 2. plan to the first reachable drop pose (from above, straight down) and execute
     sync_world()
     t = time.time()
     to_drop, down, di = planner.plan_grasp(state["q"], drops, approach=0.10, approach_dir=(0, 0, -1), order="given", max_tries=16, tag="place")
@@ -510,6 +574,7 @@ def place(i, T0, support, width):
     t_plan = time.time() - t
     run(to_drop, "to above the container")
     run(down, "down into the container")
+    # 3. still in the hand? then release and back off
     slip = float(np.linalg.norm((np.linalg.inv(T_of(planner.fk(q_meas()))) @ obj_T(i))[:3, 3] - T_held[:3, 3]))
     if slip > 0.03:
         raise Fail(f"object lost on the way to the container (moved {slip * 1000:.0f} mm in the hand)")
@@ -521,6 +586,7 @@ def place(i, T0, support, width):
         back = planner.plan_cartesian(state["q"], pregrasp(p, 0.10), quiet=True) or planner.plan_cartesian(state["q"], p + np.r_[0, 0, 0.10, 0, 0, 0, 0], quiet=True)
     if back is not None:
         run(back, "back off")
+    # 4. result: inside the container? how far from the planned spot, how much tilted?
     hold(10)
     T = obj_T(i)
     inside = (L.CONTAINER_INNER[0][0] < T[0, 3] < L.CONTAINER_INNER[0][1] and L.CONTAINER_INNER[1][0] < T[1, 3] < L.CONTAINER_INNER[1][1]
@@ -532,6 +598,7 @@ def place(i, T0, support, width):
 
 
 def go_home():
+    """Plan back to the home pose; if no plan is found, put the arm there directly (not a real motion)."""
     sync_world()
     p = planner.plan_to_config(state["q"], HOME, tag="home")
     if p is not None:
@@ -544,7 +611,9 @@ def go_home():
     return "arm reset (not a planned motion)"
 
 
-# ---------------------------------------------------------------- stills (--stills): the scene at an episode start
+# ======================================================================================================================
+# 11. --stills MODE: render high-resolution pictures of the scene (crates closed, then open) and exit
+# ======================================================================================================================
 args.out.mkdir(parents=True, exist_ok=True)
 if args.stills:
     import os
@@ -572,7 +641,11 @@ if args.stills:
     sys.stdout.flush()
     os._exit(0)
 
-# ---------------------------------------------------------------- episodes
+# ======================================================================================================================
+# 12. MAIN LOOP: the episodes
+#   Even episodes take an object from a drawer, odd ones from the shelf. Objects of that source are tried in random
+#   order until one ends in the container. Each episode writes ep<NN>.mp4 and adds its record to episodes.json.
+# ======================================================================================================================
 records = []
 for ep in range(args.episodes):
     reset_episode()
@@ -612,6 +685,7 @@ for ep in range(args.episodes):
         imageio.mimwrite(args.out / f"ep{ep:02d}{args.tag}.mp4", frames, fps=10, macro_block_size=1)
     (args.out / f"episodes{args.tag}.json").write_text(json.dumps(records, indent=1, default=float))
 
+# summary of all episodes, then exit (os._exit: Isaac's normal shutdown can hang)
 print("\nSUMMARY")
 for r in records:
     a = r["attempts"][-1]

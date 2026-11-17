@@ -65,6 +65,7 @@ WRIST_TARGET = (0.0, 0.0, 0.30)  # point the wrist camera looks at, in the ur5e_
 WRIST_FOCAL_MM = 12.0  # ~82 deg
 
 
+# ---- cameras -------------------------------------------------------------------------------------------
 def look_at_quat(eye, target, up=(0.0, 0.0, 1.0)) -> tuple[float, float, float, float]:
     """(w, x, y, z) for Isaac Lab's 'world' camera convention (forward +x, left +y, up +z)."""
     from scipy.spatial.transform import Rotation
@@ -92,6 +93,7 @@ def _camera(name: str, eye, focal: float, parent: str = "{ENV_REGEX_NS}", **kw) 
     )
 
 
+# ---- robot: UR5e + Robotiq 2F-85 from assets/usd, PD joint drives ---------------------------------------
 def _robot_cfg() -> ArticulationCfg:
     return ArticulationCfg(
         prim_path="{ENV_REGEX_NS}/Robot",
@@ -126,6 +128,7 @@ def _robot_cfg() -> ArticulationCfg:
     )
 
 
+# ---- base scene (scene/pick_place.py extends it) ----------------------------------------------------------
 @configclass
 class SceneCfg(InteractiveSceneCfg):
     ground = AssetBaseCfg(prim_path="/World/ground", spawn=sim_utils.GroundPlaneCfg())
@@ -148,6 +151,7 @@ class SceneCfg(InteractiveSceneCfg):
     )
 
 
+# ---- Isaac Lab managers: actions (the controller), observations, events, rewards, terminations ------------
 @configclass
 class ActionsCfg:
     """Arm: planned joint trajectories (planning/); gripper: linkage model (use_simple_gripper replaces it)."""
@@ -188,6 +192,7 @@ class TerminationsCfg:
     time_out = DoneTerm(func=time_out, time_out=True)
 
 
+# ---- the environment config: scene + managers + timing --------------------------------------------------
 @configclass
 class Ur5eEnvCfg(ManagerBasedRLEnvCfg):
     scene: SceneCfg = SceneCfg(num_envs=1, env_spacing=4.0)
